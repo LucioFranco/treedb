@@ -1,3 +1,6 @@
+use crate::lru::Lru;
+use lru::LruCache;
+use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
@@ -15,12 +18,15 @@ pub enum Error {
 #[derive(Debug)]
 pub struct Pager {
     file: File,
-    slots: Box<[Page]>,
+    // map: HashMap<PageId, usize>,
+    // slots: Box<[Page]>,
+    lru: LruCache<PageId, Page>,
     cache_size: usize,
     page_size: usize,
+    // lru: Lru<PageId>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct PageId(usize);
 
 #[derive(Debug)]
@@ -42,18 +48,55 @@ impl Pager {
         let mut slots = Vec::with_capacity(cache_size);
         slots.extend(std::iter::repeat_with(Page::default).take(cache_size));
 
+        let lru = Lru::new(cache_size);
+
         Pager {
             file,
-            slots: slots.into_boxed_slice(),
+            // slots: slots.into_boxed_slice(),
+            // map: HashMap::new(),
             cache_size,
             page_size,
+            lru,
         }
     }
 
     pub fn get(&mut self, page_id: impl Into<PageId>) -> Result<&mut CachedPage> {
         let page_id = page_id.into();
-        if let Some(page) = self.slots.get_mut(usize::from(page_id)) {
-            page.read(page_id, self.page_size, &self.file)
+        if let Some(page) = self.lru.get_mut(&page_id) {
+            match page {
+                Page::Free => {
+                    *page = Page::Cached(Box::new(CachedPage {
+                        id: page_id,
+                        data: vec![0; self.page_size].into_boxed_slice(),
+                        dirty: true,
+                    }));
+                }
+                Page::Uncached => {
+                    let offset = self.page_size * usize::from(page_id);
+
+                    // let unused_id = self.lru.insert(page_id, offset);
+
+                    let mut buf = vec![0; self.page_size];
+
+                    self.file.read_exact_at(&mut buf[..], offset as u64)?;
+
+                    let page = Page::Cached(Box::new(CachedPage {
+                        id: page_id,
+                        data: buf.into_boxed_slice(),
+                        dirty: false,
+                    }));
+
+                    // if let Some((page_id, page)) = self.lru.put(page_id, page) {
+
+                    // }
+                }
+                Page::Cached(_) => self.lru.bump(&page_id),
+            };
+
+            match page {
+                Page::Cached(cached) => Ok(cached),
+                _ => unreachable!(),
+            }
         } else {
             Err(Error::IndexOutofBounds(page_id))
         }
@@ -62,7 +105,15 @@ impl Pager {
     pub fn flush(&mut self, page_id: impl Into<PageId>) -> Result<()> {
         let page_id = page_id.into();
         if let Some(page) = self.slots.get_mut(usize::from(page_id)) {
-            page.write(page_id, self.page_size, &self.file)
+            if let Page::Cached(page) = page {
+                let offset = self.page_size * usize::from(page_id);
+
+                self.file.write_all_at(&page.data[..], offset as u64)?;
+
+                page.dirty = false;
+            }
+
+            Ok(())
         } else {
             Err(Error::IndexOutofBounds(page_id))
         }
@@ -77,62 +128,6 @@ impl Pager {
 
     pub fn flush_all(&mut self) -> Result<()> {
         todo!()
-    }
-}
-
-impl Page {
-    fn read(&mut self, index: PageId, page_size: usize, file: &File) -> Result<&mut CachedPage> {
-        let page = match self {
-            Page::Free => {
-                let page = Box::new(CachedPage {
-                    id: index,
-                    data: vec![0; page_size].into_boxed_slice(),
-                    dirty: true,
-                });
-
-                *self = Page::Cached(page);
-
-                match self {
-                    Page::Cached(cached) => cached,
-                    _ => unreachable!(),
-                }
-            }
-            Page::Uncached => {
-                let offset = page_size * usize::from(index);
-
-                let mut buf = vec![0; page_size];
-
-                file.read_exact_at(&mut buf[..], offset as u64)?;
-
-                let page = Box::new(CachedPage {
-                    id: index,
-                    data: buf.into_boxed_slice(),
-                    dirty: false,
-                });
-
-                *self = Page::Cached(page);
-
-                match self {
-                    Page::Cached(cached) => cached,
-                    _ => unreachable!(),
-                }
-            }
-            Page::Cached(cached) => cached,
-        };
-
-        Ok(page)
-    }
-
-    fn write(&mut self, index: PageId, page_size: usize, file: &File) -> Result<()> {
-        if let Page::Cached(page) = self {
-            let offset = page_size * usize::from(index);
-
-            file.write_all_at(&page.data[..], offset as u64)?;
-
-            page.dirty = false;
-        }
-
-        Ok(())
     }
 }
 
