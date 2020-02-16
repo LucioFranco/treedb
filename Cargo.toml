@@ -9,3 +9,5 @@ edition = "2018"
 [dependencies]
 thiserror = "1"
 lru = "0.4"
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
