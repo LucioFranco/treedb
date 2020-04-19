@@ -16,7 +16,8 @@ fn smoke() {
     let mut pager = Pager::new(4096, file, 1024);
 
     let page = pager.new_page().unwrap();
-    page.buf_mut().copy_from_slice(&vec![1u8; 4096][..]);
+    // page.buf_mut().copy_from_slice(&vec![1u8; 4096][..]);
+    page.write(&vec![1u8; 4096][..]);
     let id = page.id();
 
     let page = pager.get(id).unwrap();
@@ -28,11 +29,11 @@ fn smoke() {
 
     pager.evict(0).unwrap();
 
-    let _page = pager.get(0).unwrap();
+    let page = pager.get(0).unwrap();
 
-    // for b in page.data_mut() {
-    //     assert_eq!(b, &mut 1u8);
-    // }
+    for b in page.read() {
+        assert_eq!(b, &mut 1u8);
+    }
 }
 
 // #[test]

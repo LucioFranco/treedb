@@ -134,14 +134,12 @@ impl CachedPage {
     }
 
     pub fn write(&mut self, src: &[u8]) {
-        assert!(src.len() > 4096, "src buffer larger than 4096");
-
-        let needed = src.len();
-        self.buf.reserve();
+        assert!(src.len() >= 4096, "buffer larger than 4096");
+        self.buf.extend_from_slice(src);
     }
 
-    pub fn buf_mut(&mut self) -> &mut [u8] {
-        &mut self.buf
+    pub fn read(&mut self) -> &[u8] {
+        &self.buf[..]
     }
 }
 
