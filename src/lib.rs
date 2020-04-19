@@ -1,8 +1,8 @@
 //! `treedb` is an on disk b-tree
 
-pub mod page;
+// pub mod page;
 pub mod pager;
-pub mod tree;
+// pub mod tree;
 
 use pager::PageId;
 

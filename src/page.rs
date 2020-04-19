@@ -1,21 +1,32 @@
 use crate::Result;
 use serde::{Deserialize, Serialize};
 
+type Key = Vec<u8>;
+type Value = Vec<u8>;
+type PageId = usize;
+
 #[derive(Debug)]
 pub struct Page {
     page_size: usize,
-    // data: Box<[u8]>,
     pub kind: Kind,
 }
 
 #[derive(Debug)]
 pub enum Kind {
     Leaf(Leaf),
+    Internal(Internal),
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct Leaf {
-    nodes: Vec<(Vec<u8>, Vec<u8>)>,
+    keys: Vec<Key>,
+    values: Vec<Value>,
+}
+
+#[derive(Default, Debug, Serialize, Deserialize)]
+pub struct Internal {
+    keys: Vec<Key>,
+    pointers: Vec<PageId>,
 }
 
 impl Page {

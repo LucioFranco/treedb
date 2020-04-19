@@ -1,4 +1,4 @@
-use crate::{page::Page, Error, Result};
+use crate::{Error, Result};
 use lru::LruCache;
 use std::fmt;
 use std::fs::File;
@@ -19,7 +19,7 @@ pub struct PageId(usize);
 #[derive(Debug)]
 pub struct CachedPage {
     id: PageId,
-    inner: Page,
+    buf: Vec<u8>,
     dirty: bool,
 }
 
@@ -36,21 +36,17 @@ impl Pager {
         }
     }
 
-    pub fn alloc_page(&mut self, page: Page) -> Result<&mut CachedPage> {
-        // TODO: add usize::max check
-
+    pub fn new_page(&mut self) -> Result<&mut CachedPage> {
         let page_id = PageId(self.next_page);
-
         self.next_page += 1;
 
         let page = CachedPage {
             id: page_id,
-            inner: page,
-            dirty: true,
+            buf: Vec::new(),
+            dirty: false,
         };
 
         self.pop_lru()?;
-
         self.lru.put(page_id, page);
 
         if let Some(page) = self.lru.get_mut(&page_id) {
@@ -77,11 +73,9 @@ impl Pager {
 
             self.file.read_exact_at(&mut buf[..], offset as u64)?;
 
-            let inner = Page::deserialize(self.page_size, buf)?;
-
             let page = CachedPage {
                 id: page_id,
-                inner,
+                buf,
                 dirty: false,
             };
 
@@ -108,8 +102,7 @@ impl Pager {
     fn flush(page_size: usize, file: &File, page: &CachedPage) -> Result<()> {
         let offset = page_size * usize::from(page.id);
 
-        let data = page.page().serialize()?;
-        file.write_all_at(&data[..], offset as u64)?;
+        file.write_all_at(&page.buf[..], offset as u64)?;
 
         Ok(())
     }
@@ -140,13 +133,15 @@ impl CachedPage {
         self.id
     }
 
-    pub fn page_mut(&mut self) -> &mut Page {
-        self.dirty = true;
-        &mut self.inner
+    pub fn write(&mut self, src: &[u8]) {
+        assert!(src.len() > 4096, "src buffer larger than 4096");
+
+        let needed = src.len();
+        self.buf.reserve();
     }
 
-    pub fn page(&self) -> &Page {
-        &self.inner
+    pub fn buf_mut(&mut self) -> &mut [u8] {
+        &mut self.buf
     }
 }
 
