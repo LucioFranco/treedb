@@ -1,6 +1,6 @@
 //! `treedb` is an on disk b-tree
 
-// pub mod page;
+pub mod node;
 pub mod pager;
 // pub mod tree;
 

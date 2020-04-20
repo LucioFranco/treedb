@@ -1,26 +1,90 @@
 use crate::{Error, Result};
 use lru::LruCache;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 
+/// A versioned pager that uses Cow semantics.
+///
+/// This pager will attempt to copy and remap pages in favor using locks. This
+/// is achieved by collecting a linked lists of remapped pages and free pages.
 #[derive(Debug)]
-pub struct Pager {
-    file: File,
-    lru: LruCache<PageId, CachedPage>,
-    next_page: usize,
-    cache_size: usize,
-    page_size: usize,
+pub struct VersionedPager {
+    pager: Pager,
+    // Remapped pages go into this queue to allow us to
+    // undo remapps at the next commit. So when a snapshot no longer
+    // requires a page it will append it to this queue which we can start to
+    // undo at commit time.
+    remap_queue: VecDeque<LogicalPageId>,
+    remapped_pages: HashMap<LogicalPageId, BTreeMap<Version, PhysicalPageId>>,
+}
+
+impl VersionedPager {
+    /// Atomically update the page by creating a new page for the specified
+    /// version.
+    // TODO: add `update` which adds the page to the cache and writes it to the
+    // block device.
+    pub fn atomic_update(&mut self, page: Page, version: Version) -> Result<()> {
+        todo!("VersionedPager::update_page")
+    }
+
+    /// Read a page at a specific version.
+    // TODO: add `read` that can support optionally bypassing the cache.
+    pub fn read_at(&mut self, page_id: LogicalPageId, version: Version) -> Result<Page> {
+        todo!()
+    }
+
+    /// Free a page at the specified version.
+    pub fn free(&mut self, page_id: LogicalPageId, version: Version) {
+        // First check if this page id matches any "originally" remapped pages
+        // from the remapped_pages map. If it is an original page then add
+        // it to the back of the `remap_queue`. If the version is older than
+        // the last effective version we can add it to the freelist page,
+        // otherwise add it to the delayed free list queue.
+        todo!()
+    }
+
+    pub fn commit(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    /// Get the effective last version which can be more than the last commited
+    /// last version.
+    pub fn effective_last_version(&self) -> Version {
+        todo!()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
-pub struct PageId(usize);
+pub struct PhysicalPageId(usize);
+
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct LogicalPageId(usize);
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct Version(u64);
 
 #[derive(Debug)]
-pub struct CachedPage {
-    id: PageId,
-    buf: Vec<u8>,
+pub struct Page {
+    id: LogicalPageId,
     dirty: bool,
+    // TODO: use specialized buffer that can support uinitiatlized
+    // bytes safely.
+    buf: Vec<u8>,
+}
+
+struct RemappedPage {
+    version: Version,
+}
+
+#[derive(Debug)]
+pub struct Pager {
+    file: File,
+    lru: LruCache<LogicalPageId, Page>,
+    next_page: usize,
+    cache_size: usize,
+    page_size: usize,
 }
 
 impl Pager {
@@ -36,11 +100,11 @@ impl Pager {
         }
     }
 
-    pub fn new_page(&mut self) -> Result<&mut CachedPage> {
-        let page_id = PageId(self.next_page);
+    pub fn new_page(&mut self) -> Result<&mut Page> {
+        let page_id = LogicalPageId(self.next_page);
         self.next_page += 1;
 
-        let page = CachedPage {
+        let page = Page {
             id: page_id,
             buf: Vec::new(),
             dirty: false,
@@ -56,7 +120,7 @@ impl Pager {
         }
     }
 
-    pub fn get(&mut self, page_id: impl Into<PageId>) -> Result<&mut CachedPage> {
+    pub fn get(&mut self, page_id: impl Into<LogicalPageId>) -> Result<&mut Page> {
         let page_id = page_id.into();
 
         if page_id.0 >= self.next_page {
@@ -73,7 +137,7 @@ impl Pager {
 
             self.file.read_exact_at(&mut buf[..], offset as u64)?;
 
-            let page = CachedPage {
+            let page = Page {
                 id: page_id,
                 buf,
                 dirty: false,
@@ -99,7 +163,7 @@ impl Pager {
         Ok(())
     }
 
-    fn flush(page_size: usize, file: &File, page: &CachedPage) -> Result<()> {
+    fn flush(page_size: usize, file: &File, page: &Page) -> Result<()> {
         let offset = page_size * usize::from(page.id);
 
         file.write_all_at(&page.buf[..], offset as u64)?;
@@ -107,7 +171,7 @@ impl Pager {
         Ok(())
     }
 
-    pub fn evict(&mut self, page_id: impl Into<PageId>) -> Result<()> {
+    pub fn evict(&mut self, page_id: impl Into<LogicalPageId>) -> Result<()> {
         let page_id = page_id.into();
 
         if let Some(page) = self.lru.pop(&page_id) {
@@ -128,8 +192,8 @@ impl Pager {
     }
 }
 
-impl CachedPage {
-    pub fn id(&self) -> PageId {
+impl Page {
+    pub fn id(&self) -> LogicalPageId {
         self.id
     }
 
@@ -143,26 +207,26 @@ impl CachedPage {
     }
 }
 
-impl fmt::Display for PageId {
+impl fmt::Display for LogicalPageId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl From<PageId> for usize {
-    fn from(t: PageId) -> Self {
+impl From<LogicalPageId> for usize {
+    fn from(t: LogicalPageId) -> Self {
         t.0 as usize
     }
 }
 
-impl From<usize> for PageId {
+impl From<usize> for LogicalPageId {
     fn from(t: usize) -> Self {
-        PageId(t)
+        LogicalPageId(t)
     }
 }
 
-impl From<&PageId> for PageId {
-    fn from(t: &PageId) -> Self {
+impl From<&LogicalPageId> for LogicalPageId {
+    fn from(t: &LogicalPageId) -> Self {
         *t
     }
 }

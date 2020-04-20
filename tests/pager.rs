@@ -21,7 +21,7 @@ fn smoke() {
     let id = page.id();
 
     let page = pager.get(id).unwrap();
-    let data = page.buf_mut();
+    let data = page.read();
 
     for b in data {
         *b = 1;
@@ -36,43 +36,44 @@ fn smoke() {
     }
 }
 
-// #[test]
-// fn full() {
-//     let mut tmp = std::env::temp_dir();
-//     tmp.push("pager.full");
+#[test]
+fn full() {
+    let mut tmp = std::env::temp_dir();
+    tmp.push("pager.full");
 
-//     let file = OpenOptions::new()
-//         .write(true)
-//         .read(true)
-//         .create(true)
-//         .open(tmp)
-//         .unwrap();
+    let file = OpenOptions::new()
+        .write(true)
+        .read(true)
+        .create(true)
+        .open(tmp)
+        .unwrap();
 
-//     let mut pager = Pager::new(4096, file, 10);
+    let mut pager = Pager::new(4096, file, 10);
 
-//     let mut ids = Vec::new();
+    let mut ids = Vec::new();
 
-//     for i in 0..=255 {
-//         let page = Page::new_leaf(4096);
-//         let page = pager.alloc_page(page).unwrap();
-//         let id = page.id();
+    for i in 0..=255 {
+        let page = ;
+        let page = pager.new_page().unwrap();
+        let id = page.id();
+        page.write(&vec![0u8; 4096][..]);
 
-//         ids.push((i, id));
+        ids.push((i, id));
 
-//         let _page = pager.get(id).unwrap();
+        let page = pager.get(id).unwrap();
 
-//         // let data = page.data_mut();
+        let data = page.read();
 
-//         // for b in data {
-//         //     *b = i;
-//         // }
-//     }
+        for b in data {
+            *b = i;
+        }
+    }
 
-//     for (_i, page_id) in &ids {
-//         let _page = pager.get(page_id).unwrap();
+    for (i, page_id) in &ids {
+        let page = pager.get(page_id).unwrap();
 
-//         // for b in page.data() {
-//         //     assert_eq!(b, i);
-//         // }
-//     }
-// }
+        for b in page.read() {
+            assert_eq!(b, i);
+        }
+    }
+}
