@@ -17,7 +17,9 @@ pub struct VersionedPager {
     // requires a page it will append it to this queue which we can start to
     // undo at commit time.
     remap_queue: VecDeque<LogicalPageId>,
+
     remapped_pages: HashMap<LogicalPageId, BTreeMap<Version, PhysicalPageId>>,
+    next_page_id: usize,
 }
 
 impl VersionedPager {
@@ -54,6 +56,8 @@ impl VersionedPager {
     pub fn effective_last_version(&self) -> Version {
         todo!()
     }
+
+    fn next_page(&mut self) -> 
 }
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]

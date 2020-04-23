@@ -65,4 +65,24 @@ of
 
 #### Pager
 
-tbw
+##### Free implemenation
+
+The pager within foundationdb uses three queues to track "freepages", there are
+three types of freepages. 
+
+- Regular free list for pages that have been freed while it was outside the
+    effective version.
+- Delayed free list are for pages that do fall into the effective version range.
+- Remap queue which contains a list of pages that will get  "undone" at commit
+    time.
+
+Each queue is written into the pager on its own pages. This allows the queues
+to be flushed to disk as well. Since, the queue is FIFO pages never need to be 
+rewritten.
+
+"undoing a remapped page" means copying the latest version for said page id into
+the original page. This allows us to retroactively perform space reclaimation on
+disk and in memory.
+
+"Effecitve version" relates to versions that still contain some read reference
+to them.
