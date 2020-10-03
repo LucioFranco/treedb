@@ -1,6 +1,6 @@
 use super::{LogicalPageId, Version};
-use bytes::{Bytes, BytesMut};
-use std::ops::{Deref, DerefMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use std::mem::MaybeUninit;
 
 #[derive(Debug)]
 pub struct OwnedPage {
@@ -21,7 +21,7 @@ struct PageHeader {
 }
 
 impl OwnedPage {
-    pub fn new(id: LogicalPageId, version: Version, page_size: usize) -> Self {
+    pub(crate) fn new(id: LogicalPageId, version: Version, page_size: usize) -> Self {
         Self {
             header: PageHeader { id, version },
             buf: BytesMut::with_capacity(page_size),
@@ -44,21 +44,46 @@ impl OwnedPage {
     }
 }
 
-impl Deref for OwnedPage {
-    type Target = [u8];
+impl BufMut for OwnedPage {
+    fn remaining_mut(&self) -> usize {
+        // Return only the size we reserved upfront, we use the `remaining_mut`
+        // impl on `BytesMut` we get a very large capacity since it will grow
+        // as you add more data. We don't want this we want to hard cap this at
+        // the page size.
+        self.buf.capacity()
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.buf[..]
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        self.buf.advance_mut(cnt)
+    }
+
+    fn bytes_mut(&mut self) -> &mut [MaybeUninit<u8>] {
+        self.buf.bytes_mut()
     }
 }
 
-impl DerefMut for OwnedPage {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.buf[..]
+impl Buf for OwnedPage {
+    fn remaining(&self) -> usize {
+        self.buf.remaining()
+    }
+
+    fn bytes(&self) -> &[u8] {
+        self.buf.bytes()
+    }
+
+    fn advance(&mut self, cnt: usize) {
+        self.buf.advance(cnt)
     }
 }
 
 impl SharedPage {
+    pub(crate) fn new(id: LogicalPageId, version: Version, buf: Vec<u8>) -> Self {
+        Self {
+            header: PageHeader { id, version },
+            buf: Bytes::from(buf),
+        }
+    }
+
     pub fn id(&self) -> LogicalPageId {
         self.header.id
     }
@@ -68,10 +93,16 @@ impl SharedPage {
     }
 }
 
-impl Deref for SharedPage {
-    type Target = [u8];
+impl Buf for SharedPage {
+    fn remaining(&self) -> usize {
+        self.buf.remaining()
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.buf[..]
+    fn bytes(&self) -> &[u8] {
+        self.buf.bytes()
+    }
+
+    fn advance(&mut self, cnt: usize) {
+        self.buf.advance(cnt)
     }
 }

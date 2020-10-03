@@ -6,6 +6,7 @@ mod queue;
 mod test;
 
 use crate::{Error, Result};
+use bytes::{Buf, BufMut};
 use page::{OwnedPage, SharedPage};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -32,34 +33,54 @@ pub struct VersionedPager {
     // undo remapps at the next commit. So when a snapshot no longer
     // requires a page it will append it to this queue which we can start to
     // undo at commit time.
-    // remap_queue: VecDeque<LogicalPageId>,
-    remapped_pages: HashMap<LogicalPageId, BTreeMap<Version, PhysicalPageId>>,
+    remap_queue: VecDeque<RemappedPage>,
+    delayed_free_list: VecDeque<DelayedFreePage>,
+    free_list: VecDeque<LogicalPageId>,
+
+    page_table: HashMap<LogicalPageId, BTreeMap<Version, PhysicalPageId>>,
 
     next_page_id: usize,
 }
 
 impl VersionedPager {
-    pub fn from_file(file: File) -> Result<Self> {
-        let header = Header {
-            version: VERSION,
-            page_size: PAGE_SIZE as u32,
-            // Start with 1, we could add a backup here.
-            page_count: 1,
-            commited_version: 1,
-            oldest_version: 1,
-        };
+    /// Recover a `VersionedPager`, if the file is empty it will create a new
+    /// pager.
+    pub fn recover(file: File) -> Result<Self> {
+        let file_size = file.metadata()?.len();
 
-        let mut pager = Self {
-            file,
-            header,
-            remapped_pages: HashMap::new(),
-            // One because header page
-            next_page_id: 1,
-        };
+        if file_size > PAGE_SIZE as u64 {
+            let page = VersionedPager::read_page(&file, PhysicalPageId(0))?;
+            let header = bincode::deserialize::<Header>(&page[..])?;
 
-        pager.write_header()?;
+            Ok(Self {
+                file,
+                header,
+                page_table: HashMap::new(),
+                // One because header page
+                next_page_id: 1,
+            })
+        } else {
+            let header = Header {
+                version: VERSION,
+                page_size: PAGE_SIZE as u32,
+                // Start with 1, we could add a backup here.
+                page_count: 1,
+                commited_version: 1,
+                oldest_version: 1,
+            };
 
-        Ok(pager)
+            let mut pager = Self {
+                file,
+                header,
+                page_table: HashMap::new(),
+                // One because header page
+                next_page_id: 1,
+            };
+
+            pager.write_header()?;
+
+            Ok(pager)
+        }
     }
 
     fn write_header(&mut self) -> Result<()> {
@@ -83,33 +104,21 @@ impl VersionedPager {
         Ok(logical_id)
     }
 
-    pub fn new_page_buffer(&mut self) -> Result<Page> {
-        let page = Page {
-            id: self.new_page_id()?,
-            version: self.current_version(),
-            buf: Buf::Owned(vec![0u8; self.header.page_size as usize]),
-        };
+    pub fn new_page_buffer(&mut self) -> Result<OwnedPage> {
+        let page = OwnedPage::new(
+            self.new_page_id()?,
+            self.current_version(),
+            self.header.page_size as usize,
+        );
 
         Ok(page)
     }
 
-    pub fn write_page3(&mut self, page: OwnedPage) -> Result<SharedPage> {
-        // TODO: this should take a buf and write it into memory then
-        // clone it.
-        self.write_page(page.id().0, &page[..])?;
+    pub fn write_page(&mut self, page: OwnedPage) -> Result<SharedPage> {
+        let offset = page.id().0 * self.header.page_size as usize;
+        self.file.write_at(page.bytes(), offset as u64)?;
+
         Ok(page.freeze())
-    }
-
-    pub fn write_page2(&mut self, page: Page) -> Result<()> {
-        // TODO: this should take a buf and write it into memory then
-        // clone it.
-        self.write_page(page.id.0, &page.buf[..])
-    }
-
-    fn write_page(&mut self, page_id: usize, data: &[u8]) -> Result<()> {
-        let offset = page_id * self.header.page_size as usize;
-        self.file.write_at(data, offset as u64)?;
-        Ok(())
     }
 
     /// Atomically update the page by creating a new page for the specified
@@ -120,28 +129,36 @@ impl VersionedPager {
         &mut self,
         page_id: LogicalPageId,
         version: Version,
-        data: Vec<u8>,
+        data: &[u8],
     ) -> Result<LogicalPageId> {
         // Copy page
         let new_page_id = self.new_page_id()?;
 
-        let versions = self
-            .remapped_pages
-            .entry(page_id)
-            .or_insert(BTreeMap::new());
+        let versions = self.page_table.entry(page_id).or_insert(BTreeMap::new());
+
+        // Pushed into the queue to be un-mapped later
+        self.remap_queue.push_back(RemappedPage {
+            version,
+            original_page_id: page_id,
+            new_page_id,
+        });
 
         versions.insert(version, PhysicalPageId(new_page_id.0));
 
-        self.write_page(new_page_id.0, &data[..])?;
+        let mut page = OwnedPage::new(page_id, version, data.len());
+
+        page.put(&data[..]);
+
+        self.write_page(page)?;
 
         Ok(new_page_id)
     }
 
     /// Read a page at a specific version.
     // TODO: add `read` that can support optionally bypassing the cache.
-    pub fn read_at(&mut self, id: LogicalPageId, version: Version) -> Result<Page> {
+    pub fn read_at(&mut self, id: LogicalPageId, version: Version) -> Result<SharedPage> {
         // Get remapped page!
-        let page_id = if let Some(remapped_pages) = self.remapped_pages.get(&id) {
+        let page_id = if let Some(remapped_pages) = self.page_table.get(&id) {
             let (_, page) = remapped_pages
                 .range(..)
                 .next_back()
@@ -152,17 +169,17 @@ impl VersionedPager {
             PhysicalPageId(id.0)
         };
 
-        let buf = self.read_page(page_id)?;
+        let buf = VersionedPager::read_page(&self.file, page_id)?;
 
-        Ok(Page { id, version, buf })
+        Ok(SharedPage::new(id, version, buf))
     }
 
-    fn read_page(&mut self, page_id: PhysicalPageId) -> Result<Buf> {
+    fn read_page(file: &File, page_id: PhysicalPageId) -> Result<Vec<u8>> {
         let mut buf = vec![0u8; PAGE_SIZE];
         let offset = page_id.0 * PAGE_SIZE;
-        self.file.read_at(&mut buf[..], offset as u64)?;
+        file.read_at(&mut buf[..], offset as u64)?;
 
-        Ok(Buf::Shared(Arc::new(buf)))
+        Ok(buf)
     }
 
     /// Free a page at the specified version.
@@ -184,6 +201,10 @@ impl VersionedPager {
         Ok(())
     }
 
+    fn remap_cleanup(&mut self) -> Result<()> {
+        todo!()
+    }
+
     /// Get the effective last version which can be more than the last commited
     /// last version.
     pub fn effective_last_version(&self) -> Version {
@@ -203,50 +224,63 @@ pub struct PhysicalPageId(usize);
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct LogicalPageId(usize);
 
+#[derive(Debug)]
+struct DelayedFreePage {
+    version: Version,
+    page_id: LogicalPageId,
+}
+
+#[derive(Debug)]
+struct RemappedPage {
+    version: Version,
+    original_page_id: LogicalPageId,
+    new_page_id: LogicalPageId,
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Version(u64);
 
-#[derive(Debug, Clone)]
-pub struct Page {
-    id: LogicalPageId,
-    version: Version,
-    buf: Buf,
-}
+// #[derive(Debug, Clone)]
+// pub struct Page {
+//     id: LogicalPageId,
+//     version: Version,
+//     buf: Buf,
+// }
 
-#[derive(Debug, Clone)]
-pub enum Buf {
-    Shared(Arc<Vec<u8>>),
-    Owned(Vec<u8>),
-}
+// #[derive(Debug, Clone)]
+// pub enum Buf {
+//     Shared(Arc<Vec<u8>>),
+//     Owned(Vec<u8>),
+// }
 
-impl Buf {
-    /// If this page is shared, this will make a copy.
-    pub fn to_mut(&mut self) -> &mut [u8] {
-        match *self {
-            Buf::Shared(ref buf) => {
-                *self = Buf::Owned(Vec::clone(&buf));
+// impl Buf {
+//     /// If this page is shared, this will make a copy.
+//     pub fn to_mut(&mut self) -> &mut [u8] {
+//         match *self {
+//             Buf::Shared(ref buf) => {
+//                 *self = Buf::Owned(Vec::clone(&buf));
 
-                match *self {
-                    Buf::Shared(_) => unreachable!(),
-                    Buf::Owned(ref mut b) => b,
-                }
-            }
+//                 match *self {
+//                     Buf::Shared(_) => unreachable!(),
+//                     Buf::Owned(ref mut b) => b,
+//                 }
+//             }
 
-            Buf::Owned(ref mut buf) => &mut buf[..],
-        }
-    }
-}
+//             Buf::Owned(ref mut buf) => &mut buf[..],
+//         }
+//     }
+// }
 
-impl std::ops::Deref for Buf {
-    type Target = [u8];
+// impl std::ops::Deref for Buf {
+//     type Target = [u8];
 
-    fn deref(&self) -> &[u8] {
-        match &self {
-            Buf::Owned(b) => &b[..],
-            Buf::Shared(b) => &b[..],
-        }
-    }
-}
+//     fn deref(&self) -> &[u8] {
+//         match &self {
+//             Buf::Owned(b) => &b[..],
+//             Buf::Shared(b) => &b[..],
+//         }
+//     }
+// }
 
 impl fmt::Display for LogicalPageId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
