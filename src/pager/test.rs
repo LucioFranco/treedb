@@ -1,10 +1,75 @@
+use std::{cell::RefCell, rc::Rc};
+
 use super::*;
 use bytes::BufMut;
 
+#[derive(Debug, Default, Clone)]
+struct MemoryFile(pub(crate) Rc<RefCell<Vec<u8>>>);
+
+impl File for MemoryFile {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize> {
+        let offset = offset as usize;
+        let file = self.0.borrow();
+
+        if offset > file.len() {
+            todo!("return file too small error")
+        }
+
+        if offset + buf.len() > file.len() {
+            todo!("return file too small error")
+        }
+
+        buf.copy_from_slice(&file[offset..offset + buf.len()]);
+
+        Ok(buf.len())
+    }
+
+    fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize> {
+        let mut file = self.0.borrow_mut();
+
+        let offs = offset as usize;
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+        if offs > file.len() {
+            /* fill extra space with zeros */
+            file.resize(offs, 0);
+            file.extend_from_slice(buf);
+        } else {
+            /* 2 pieces:
+             *  - copy_from_slice() what fits
+             *  - extend_from_slice() what doesn't
+             */
+            let l = {
+                let r = &mut file[offs..];
+                let l = std::cmp::min(buf.len(), r.len());
+                let r = &mut r[..l];
+                let buf = &buf[..l];
+                r.copy_from_slice(buf);
+                l
+            };
+
+            if l < buf.len() {
+                file.extend_from_slice(&buf[l..]);
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn sync_data(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn len(&self) -> Result<usize> {
+        let len = self.0.borrow().len();
+        Ok(len)
+    }
+}
+
 #[test]
 fn smoke() {
-    let file = tempfile::tempfile().unwrap();
-    let file2 = file.try_clone().unwrap();
+    let file = MemoryFile::default();
+    let file2 = file.clone();
 
     let mut pager = VersionedPager::recover(file).unwrap();
 

@@ -29,7 +29,7 @@ impl<T: Value> Queue<T> {
     }
 }
 
-trait Value {
+pub trait Value {
     type Cutoff: PartialEq;
 
     fn eq(&self, other: Self::Cutoff) -> Ordering;

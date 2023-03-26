@@ -11,22 +11,28 @@ use page::{OwnedPage, SharedPage};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
-use std::fs::File;
-use std::os::unix::fs::FileExt;
-use std::sync::Arc;
 
 /// First version of this!
 const VERSION: u16 = 1;
 /// 4kb page
 const PAGE_SIZE: usize = 4 * 1024;
 
+pub trait File {
+    fn len(&self) -> Result<usize>;
+
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize>;
+    fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize>;
+
+    fn sync_data(&self) -> Result<()>;
+}
+
 /// A versioned pager that uses Cow semantics.
 ///
 /// This pager will attempt to copy and remap pages in favor using locks. This
 /// is achieved by collecting a linked lists of remapped pages and free pages.
 #[derive(Debug)]
-pub struct VersionedPager {
-    file: File,
+pub struct VersionedPager<F> {
+    file: F,
     header: Header,
 
     // Remapped pages go into this queue to allow us to
@@ -42,14 +48,17 @@ pub struct VersionedPager {
     next_page_id: usize,
 }
 
-impl VersionedPager {
+impl<F> VersionedPager<F>
+where
+    F: File,
+{
     /// Recover a `VersionedPager`, if the file is empty it will create a new
     /// pager.
-    pub fn recover(file: File) -> Result<Self> {
-        let file_size = file.metadata()?.len();
+    pub fn recover(file: F) -> Result<Self> {
+        let file_size = file.len()?;
 
-        if file_size > PAGE_SIZE as u64 {
-            let page = VersionedPager::read_page(&file, PhysicalPageId(0))?;
+        if file_size > PAGE_SIZE {
+            let page = Self::read_page(&file, PhysicalPageId(0))?;
             let header = bincode::deserialize::<Header>(&page[..])?;
 
             Ok(Self {
@@ -58,6 +67,9 @@ impl VersionedPager {
                 page_table: HashMap::new(),
                 // One because header page
                 next_page_id: 1,
+                delayed_free_list: VecDeque::default(),
+                remap_queue: VecDeque::default(),
+                free_list: VecDeque::default(),
             })
         } else {
             let header = Header {
@@ -75,6 +87,9 @@ impl VersionedPager {
                 page_table: HashMap::new(),
                 // One because header page
                 next_page_id: 1,
+                delayed_free_list: VecDeque::default(),
+                remap_queue: VecDeque::default(),
+                free_list: VecDeque::default(),
             };
 
             pager.write_header()?;
@@ -169,12 +184,12 @@ impl VersionedPager {
             PhysicalPageId(id.0)
         };
 
-        let buf = VersionedPager::read_page(&self.file, page_id)?;
+        let buf = Self::read_page(&self.file, page_id)?;
 
         Ok(SharedPage::new(id, version, buf))
     }
 
-    fn read_page(file: &File, page_id: PhysicalPageId) -> Result<Vec<u8>> {
+    fn read_page(file: &F, page_id: PhysicalPageId) -> Result<Vec<u8>> {
         let mut buf = vec![0u8; PAGE_SIZE];
         let offset = page_id.0 * PAGE_SIZE;
         file.read_at(&mut buf[..], offset as u64)?;
