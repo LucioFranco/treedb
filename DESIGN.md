@@ -60,10 +60,18 @@ Version and PhysicalPageId.
 
 #### Cursor
 
-A `Cursor` is a type that is able to iterate through the tree. It is a combination
-of 
+A `Cursor` is a type that is able to iterate through the tree.  
 
 #### Pager
+
+##### Queue
+
+The pager contains a few queues that it uses to track things like the free list,
+delayed free list and the remap queue. Each of these queues store metadata for
+the pager. The `Queue` type has these operations `push_back`, `push_front`, `pop_front` and `flush`. 
+
+TODO: Write about the cursors, how the queue handles pushing to the front
+(creating new linked list), etc
 
 ##### Free implemenation
 

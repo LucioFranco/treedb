@@ -1,5 +1,5 @@
 use super::{LogicalPageId, Version};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{buf::UninitSlice, Buf, BufMut, Bytes, BytesMut};
 use std::mem::MaybeUninit;
 
 #[derive(Debug)]
@@ -44,7 +44,7 @@ impl OwnedPage {
     }
 }
 
-impl BufMut for OwnedPage {
+unsafe impl BufMut for OwnedPage {
     fn remaining_mut(&self) -> usize {
         // Return only the size we reserved upfront, we use the `remaining_mut`
         // impl on `BytesMut` we get a very large capacity since it will grow
@@ -57,8 +57,8 @@ impl BufMut for OwnedPage {
         self.buf.advance_mut(cnt)
     }
 
-    fn bytes_mut(&mut self) -> &mut [MaybeUninit<u8>] {
-        self.buf.bytes_mut()
+    fn chunk_mut(&mut self) -> &mut UninitSlice {
+        self.buf.chunk_mut()
     }
 }
 
@@ -67,8 +67,8 @@ impl Buf for OwnedPage {
         self.buf.remaining()
     }
 
-    fn bytes(&self) -> &[u8] {
-        self.buf.bytes()
+    fn chunk(&self) -> &[u8] {
+        self.buf.chunk()
     }
 
     fn advance(&mut self, cnt: usize) {
@@ -77,10 +77,10 @@ impl Buf for OwnedPage {
 }
 
 impl SharedPage {
-    pub(crate) fn new(id: LogicalPageId, version: Version, buf: Vec<u8>) -> Self {
+    pub(crate) fn new(id: LogicalPageId, version: Version, buf: Bytes) -> Self {
         Self {
             header: PageHeader { id, version },
-            buf: Bytes::from(buf),
+            buf,
         }
     }
 
@@ -98,8 +98,8 @@ impl Buf for SharedPage {
         self.buf.remaining()
     }
 
-    fn bytes(&self) -> &[u8] {
-        self.buf.bytes()
+    fn chunk(&self) -> &[u8] {
+        self.buf.chunk()
     }
 
     fn advance(&mut self, cnt: usize) {

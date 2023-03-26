@@ -5,8 +5,8 @@ mod queue;
 #[cfg(test)]
 mod test;
 
-use crate::{Error, Result};
-use bytes::{Buf, BufMut};
+use crate::Result;
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use page::{OwnedPage, SharedPage};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -58,8 +58,10 @@ where
         let file_size = file.len()?;
 
         if file_size > PAGE_SIZE {
-            let page = Self::read_page(&file, PhysicalPageId(0))?;
-            let header = bincode::deserialize::<Header>(&page[..])?;
+            let mut header_buf = BytesMut::zeroed(PAGE_SIZE);
+            // TODO: Probably need to make this read_exact?
+            file.read_at(&mut header_buf[..], 0)?;
+            let header = bincode::deserialize::<Header>(&header_buf[..])?;
 
             Ok(Self {
                 file,
@@ -131,7 +133,7 @@ where
 
     pub fn write_page(&mut self, page: OwnedPage) -> Result<SharedPage> {
         let offset = page.id().0 * self.header.page_size as usize;
-        self.file.write_at(page.bytes(), offset as u64)?;
+        self.file.write_at(page.chunk(), offset as u64)?;
 
         Ok(page.freeze())
     }
@@ -184,17 +186,17 @@ where
             PhysicalPageId(id.0)
         };
 
-        let buf = Self::read_page(&self.file, page_id)?;
+        let buf = self.read_page(page_id)?;
 
         Ok(SharedPage::new(id, version, buf))
     }
 
-    fn read_page(file: &F, page_id: PhysicalPageId) -> Result<Vec<u8>> {
-        let mut buf = vec![0u8; PAGE_SIZE];
+    fn read_page(&self, page_id: PhysicalPageId) -> Result<Bytes> {
+        let mut buf = BytesMut::with_capacity(PAGE_SIZE);
         let offset = page_id.0 * PAGE_SIZE;
-        file.read_at(&mut buf[..], offset as u64)?;
+        self.file.read_at(&mut buf[..], offset as u64)?;
 
-        Ok(buf)
+        Ok(buf.freeze())
     }
 
     /// Free a page at the specified version.
@@ -233,7 +235,7 @@ where
     // fn next_page(&mut self) ->
 }
 
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PhysicalPageId(usize);
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
