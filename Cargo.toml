@@ -8,7 +8,6 @@ edition = "2018"
 
 [dependencies]
 thiserror = "1"
-lru = "0.4"
 clru = "0.6"
 shared_arena = "0.8"
 serde = { version = "1", features = ["derive"] }
