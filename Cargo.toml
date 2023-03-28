@@ -9,6 +9,8 @@ edition = "2018"
 [dependencies]
 thiserror = "1"
 lru = "0.4"
+clru = "0.6"
+shared_arena = "0.8"
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
 zerocopy = "0.7.0-alpha.3"

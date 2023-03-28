@@ -1,7 +1,42 @@
 use std::{cell::RefCell, rc::Rc};
 
 use super::*;
-use bytes::BufMut;
+
+#[test]
+fn update() {
+    let file = MemoryFile::default();
+    let file2 = file.clone();
+
+    let mut pager = Pager::recover(file).unwrap();
+
+    let page1_id = pager.new_page_id();
+    let mut page1 = pager.new_page_buffer();
+
+    assert_eq!(page1_id, LogicalPageId(1));
+
+    let page1_buf = &mut Arc::get_mut(&mut page1).unwrap().buf_mut();
+    page1_buf.fill(42);
+
+    pager
+        .write_page(PhysicalPageId(page1_id.0), page1.clone())
+        .unwrap();
+
+    let version = pager.current_version();
+
+    let page1_read = pager.read_at(page1_id, version).unwrap();
+
+    assert_eq!(page1.buf(), page1_read.buf());
+
+    pager.commit().unwrap();
+
+    drop(pager);
+
+    let mut pager = Pager::recover(file2).unwrap();
+
+    let page1_read2 = pager.read_at(page1_id, version).unwrap();
+
+    assert_eq!(page1.buf(), page1_read2.buf());
+}
 
 #[derive(Debug, Default, Clone)]
 struct MemoryFile(pub(crate) Rc<RefCell<Vec<u8>>>);
@@ -63,43 +98,5 @@ impl File for MemoryFile {
     fn len(&self) -> Result<usize> {
         let len = self.0.borrow().len();
         Ok(len)
-    }
-}
-
-#[test]
-fn smoke() {
-    let file = MemoryFile::default();
-    let file2 = file.clone();
-
-    let mut pager = VersionedPager::recover(file).unwrap();
-
-    let mut page1 = pager.new_page_buffer().unwrap();
-
-    assert_eq!(page1.id(), LogicalPageId(1));
-
-    for _ in 0..(page1.remaining_mut() / 8) {
-        page1.put_u64(1337);
-    }
-
-    let page1 = pager.write_page(page1).unwrap();
-
-    let version = pager.current_version();
-    let page1_id = page1.id();
-
-    let page1_read = pager.read_at(page1_id, version).unwrap();
-
-    assert_eq!(page1.id(), page1_read.id());
-    assert_eq!(page1.version(), page1_read.version());
-
-    pager.commit().unwrap();
-
-    drop(pager);
-
-    let mut pager = VersionedPager::recover(file2).unwrap();
-
-    let mut page = pager.read_at(page1_id, version).unwrap();
-
-    for _ in 0..(page.remaining() / 8) {
-        assert_eq!(page.get_u64(), 1337);
     }
 }
