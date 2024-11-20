@@ -9,3 +9,8 @@ https://15721.courses.cs.cmu.edu/spring2020/papers/06-oltpindexes1/faleiro-cidr1
 ## Optimistic lock coupling
 
 https://db.in.tum.de/~leis/papers/artsync.pdf
+
+## 
+
+http://opendatastructures.org/ods-python/14_2_B_Trees.html
+https://cglab.ca/~abeinges/blah/rust-btree-case/
