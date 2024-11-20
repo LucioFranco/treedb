@@ -7,13 +7,13 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-thiserror = "1"
+thiserror = "2"
 sieve-cache = "0.2"
 shared_arena = "0.8"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1.0.215", features = ["derive"] }
 bincode = "1"
 zerocopy = { version = "0.8", features = ["derive"] }
-bytes = { version = "1", features = ["serde"] }
+bytes = { version = "1.8", features = ["serde"] }
 
 [dev-dependencies]
 tempfile = "3"
