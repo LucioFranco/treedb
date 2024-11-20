@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 thiserror = "1"
-clru = "0.6"
+sieve-cache = "0.2"
 shared_arena = "0.8"
 serde = { version = "1", features = ["derive"] }
 bincode = "1"

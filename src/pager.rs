@@ -14,8 +14,8 @@ use std::{
 };
 
 use bytes::BytesMut;
-use clru::CLruCache;
 use serde::{Deserialize, Serialize};
+use sieve_cache::SieveCache;
 
 use crate::Result;
 
@@ -26,7 +26,7 @@ const VERSION: u16 = 1;
 /// 4kb page
 const PAGE_SIZE: usize = 4 * 1024;
 
-type PageCache = CLruCache<LogicalPageId, PageCacheEntry>;
+type PageCache = SieveCache<LogicalPageId, PageCacheEntry>;
 
 pub trait File {
     fn len(&self) -> Result<usize>;
@@ -51,7 +51,7 @@ impl Pager {
     pub fn recover(file: impl File + 'static) -> Result<Self> {
         let file_size = file.len()?;
 
-        let cache = CLruCache::with_memory(NonZeroUsize::new(1024).unwrap(), 1024);
+        let cache = SieveCache::new(1024).unwrap();
         let page_table = HashMap::new();
         let remap_queue = Queue::create(PhysicalPageId(0), 0)?;
 
@@ -122,7 +122,7 @@ impl Pager {
 
             let entry = PageCacheEntry { page: page.clone() };
 
-            self.cache.put(logical_page_id, entry);
+            self.cache.insert(logical_page_id, entry);
 
             Ok(page)
         }
@@ -188,7 +188,7 @@ impl Pager {
         // Copy page
         let new_page_id = self.new_page_id();
 
-        self.update_page(page_id, page);
+        self.update_page(page_id, page)?;
 
         let versions = self.page_table.entry(page_id).or_insert(BTreeMap::new());
 
