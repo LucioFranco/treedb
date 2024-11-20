@@ -9,7 +9,6 @@ mod queue;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
-    num::NonZeroUsize,
     sync::Arc,
 };
 
@@ -144,38 +143,47 @@ impl Pager {
 
     /// Read a page at a specific version.
     // TODO: add `read` that can support optionally bypassing the cache.
-    pub fn read_at(&mut self, id: LogicalPageId, _version: Version) -> Result<Arc<Page>> {
-        // Get remapped page!
-        let page_id = if let Some(remapped_pages) = self.page_table.get(&id) {
-            let (_, page) = remapped_pages
-                .range(..)
-                .next_back()
-                .expect("there should be atleast one entry");
-
-            *page
-        } else {
-            PhysicalPageId(id.0)
-        };
+    pub fn read_at(&mut self, id: LogicalPageId, version: Version) -> Result<Arc<Page>> {
+        let page_id = self.get_physical_page_id(id, version);
 
         let page = self.read_page(page_id)?;
 
         Ok(page)
     }
 
-    fn update_page(&mut self, page_id: LogicalPageId, page: Arc<Page>) -> Result<()> {
-        let entry = self
-            .cache
-            .get_mut(&page_id)
-            .expect("Update page failed on cache lookup");
+    fn get_physical_page_id(&mut self, id: LogicalPageId, version: Version) -> PhysicalPageId {
+        if let Some(remapped_pages) = self.page_table.get(&id) {
+            if let Some((_, page)) = remapped_pages
+                .range(..)
+                .filter(|(v, _)| *v <= &version)
+                .next_back()
+            {
+                return *page;
+            }
+        }
 
-        entry.page = page.clone();
+        PhysicalPageId(id.0)
+    }
+
+    fn update_page(&mut self, page_id: LogicalPageId, page: Arc<Page>) -> Result<()> {
+        if !self.cache.contains_key(&page_id) {
+            self.cache
+                .insert(page_id, PageCacheEntry { page: page.clone() });
+        } else {
+            let entry = self
+                .cache
+                .get_mut(&page_id)
+                .expect("Update page failed on cache lookup");
+
+            entry.page = page.clone();
+        }
 
         self.write_page(PhysicalPageId(page_id.0), page)?;
 
         Ok(())
     }
 
-    /// Atomically update the page by crekating a new page for the specified
+    /// Atomically update the page by creating a new page for the specified
     /// version.
     // TODO: add `update` which adds the page to the cache and writes it to the
     // block device.
@@ -188,7 +196,7 @@ impl Pager {
         // Copy page
         let new_page_id = self.new_page_id();
 
-        self.update_page(page_id, page)?;
+        self.update_page(new_page_id, page)?;
 
         let versions = self.page_table.entry(page_id).or_insert(BTreeMap::new());
 
@@ -214,7 +222,7 @@ impl Pager {
     }
 
     /// Free a page at the specified version.
-    pub fn free(&mut self, page_id: LogicalPageId, version: Version) {
+    pub fn free(&mut self, _page_id: LogicalPageId, _version: Version) {
         // First check if this page id matches any "originally" remapped pages
         // from the remapped_pages map. If it is an original page then add
         // it to the back of the `remap_queue`. If the version is older than

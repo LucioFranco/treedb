@@ -28,7 +28,7 @@ enum PageType {
     Btree = 1,
 }
 
-#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Debug, Clone)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Debug, Clone, Default)]
 #[repr(C)]
 pub struct QueuePageHeader {
     next_page_id: u64,
