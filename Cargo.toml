@@ -10,7 +10,7 @@ edition = "2018"
 thiserror = "1"
 sieve-cache = "0.2"
 shared_arena = "0.8"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1.0.215", features = ["derive"] }
 bincode = "1"
 zerocopy = { version = "0.8", features = ["derive"] }
 bytes = { version = "1", features = ["serde"] }
