@@ -1,22 +1,24 @@
-use std::marker::PhantomData;
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-use zerocopy::{AsBytes, FromBytes, FromZeroes, LayoutVerified, Unaligned};
-
-use super::{LogicalPageId, Version, PAGE_SIZE};
+use super::PAGE_SIZE;
 
 pub struct Page {
     buf: [u8; PAGE_SIZE],
 }
 
+#[derive(FromBytes, Immutable, Debug, Clone)]
+#[repr(C)]
 pub struct PageView<'a, T> {
-    header: LayoutVerified<&'a [u8], PageHeader>,
-    sub_header: LayoutVerified<&'a [u8], T>,
+    header: PageHeader,
+    sub_header: T,
     payload: &'a [u8],
 }
 
+#[derive(FromBytes, Immutable, Debug)]
+#[repr(C)]
 pub struct PageViewMut<'a, T> {
-    header: LayoutVerified<&'a mut [u8], PageHeader>,
-    sub_header: LayoutVerified<&'a mut [u8], T>,
+    header: &'a mut PageHeader,
+    sub_header: &'a mut T,
     payload: &'a mut [u8],
 }
 
@@ -26,14 +28,14 @@ enum PageType {
     Btree = 1,
 }
 
-#[derive(FromBytes, AsBytes, FromZeroes, Debug, Clone)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Debug, Clone)]
 #[repr(C)]
 pub struct QueuePageHeader {
     next_page_id: u64,
     end_offset: u64,
 }
 
-#[derive(FromBytes, AsBytes, FromZeroes, Debug, Clone)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Debug, Clone)]
 #[repr(C)]
 struct PageHeader {
     version: u32,
@@ -48,7 +50,7 @@ impl Page {
         }
     }
 
-    pub fn init<T: AsBytes>(version: u32, sub_header: T) -> Page {
+    pub fn init<T: IntoBytes + Immutable>(version: u32, sub_header: T) -> Page {
         let page_header = PageHeader {
             version,
             page_type: 0,
@@ -57,16 +59,16 @@ impl Page {
 
         let mut page = Self::new();
 
-        page_header.write_to_prefix(&mut page.buf[..]);
+        page_header.write_to_prefix(&mut page.buf[..]).unwrap();
         let offset = std::mem::size_of::<PageHeader>();
-        sub_header.write_to_prefix(&mut page.buf[offset..]);
+        sub_header.write_to_prefix(&mut page.buf[offset..]).unwrap();
 
         page
     }
 
-    pub fn view<T: FromBytes>(&self) -> Option<PageView<'_, T>> {
-        let (header, payload) = LayoutVerified::new_from_prefix(&self.buf[..])?;
-        let (sub_header, payload) = LayoutVerified::<_, T>::new_from_prefix(&payload[..])?;
+    pub fn view<T: FromBytes + Immutable>(&self) -> Option<PageView<'_, T>> {
+        let (header, rest) = PageHeader::read_from_prefix(&self.buf[..]).ok()?;
+        let (sub_header, payload) = T::read_from_prefix(rest).ok()?;
 
         Some(PageView {
             header,
@@ -75,9 +77,11 @@ impl Page {
         })
     }
 
-    pub fn view_mut<T: FromBytes>(&mut self) -> Option<PageViewMut<'_, T>> {
-        let (header, payload) = LayoutVerified::new_from_prefix(&mut self.buf[..])?;
-        let (sub_header, payload) = LayoutVerified::<_, T>::new_from_prefix(&mut payload[..])?;
+    pub fn view_mut<T: FromBytes + KnownLayout + IntoBytes>(
+        &mut self,
+    ) -> Option<PageViewMut<'_, T>> {
+        let (header, rest) = PageHeader::mut_from_prefix(&mut self.buf[..]).ok()?;
+        let (sub_header, payload) = T::mut_from_prefix(rest).ok()?;
 
         Some(PageViewMut {
             header,
@@ -112,7 +116,7 @@ mod tests {
         let sub = page.view::<QueuePageHeader>().unwrap().sub_header;
         assert_eq!(sub.next_page_id, 42);
 
-        let mut sub_mut = page.view_mut::<QueuePageHeader>().unwrap().sub_header;
+        let sub_mut = page.view_mut::<QueuePageHeader>().unwrap().sub_header;
 
         sub_mut.next_page_id = 65;
 
