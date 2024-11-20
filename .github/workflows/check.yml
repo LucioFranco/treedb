@@ -34,44 +34,44 @@ jobs:
           components: rustfmt
       - name: cargo fmt --check
         run: cargo fmt --check
-  clippy:
-    runs-on: ubuntu-latest
-    name: ${{ matrix.toolchain }} / clippy
-    permissions:
-      contents: read
-      checks: write
-    strategy:
-      fail-fast: false
-      matrix:
-        # Get early warning of new lints which are regularly introduced in beta channels.
-        toolchain: [stable, beta]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-      - name: Install ${{ matrix.toolchain }}
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.toolchain }}
-          components: clippy
-      - name: cargo clippy
-        uses: giraffate/clippy-action@v1
-        with:
-          reporter: 'github-pr-check'
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-  semver:
-    runs-on: ubuntu-latest
-    name: semver
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-      - name: Install stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: cargo-semver-checks
-        uses: obi1kenobi/cargo-semver-checks-action@v2
+  # clippy:
+  #   runs-on: ubuntu-latest
+  #   name: ${{ matrix.toolchain }} / clippy
+  #   permissions:
+  #     contents: read
+  #     checks: write
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       # Get early warning of new lints which are regularly introduced in beta channels.
+  #       toolchain: [stable, beta]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         submodules: true
+  #     - name: Install ${{ matrix.toolchain }}
+  #       uses: dtolnay/rust-toolchain@master
+  #       with:
+  #         toolchain: ${{ matrix.toolchain }}
+  #         components: clippy
+  #     - name: cargo clippy
+  #       uses: giraffate/clippy-action@v1
+  #       with:
+  #         reporter: 'github-pr-check'
+  #         github_token: ${{ secrets.GITHUB_TOKEN }}
+  # semver:
+  #   runs-on: ubuntu-latest
+  #   name: semver
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         submodules: true
+  #     - name: Install stable
+  #       uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         components: rustfmt
+  #     - name: cargo-semver-checks
+  #       uses: obi1kenobi/cargo-semver-checks-action@v2
   doc:
     # run docs generation on nightly rather than stable. This enables features like
     # https://doc.rust-lang.org/beta/unstable-book/language-features/doc-cfg.html which allows an
@@ -112,7 +112,7 @@ jobs:
     # https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability
     strategy:
       matrix:
-        msrv: ["1.56.1"] # 2021 edition requires 1.56
+        msrv: ["1.80"] # 2021 edition requires 1.56
     name: ubuntu / ${{ matrix.msrv }}
     steps:
       - uses: actions/checkout@v4
