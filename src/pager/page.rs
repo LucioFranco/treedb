@@ -6,7 +6,7 @@ pub struct Page {
     buf: [u8; PAGE_SIZE],
 }
 
-#[derive(FromBytes, Immutable, Debug, Clone)]
+#[derive(FromBytes, Immutable, Debug)]
 #[repr(C)]
 pub struct PageView<'a, T> {
     header: PageHeader,

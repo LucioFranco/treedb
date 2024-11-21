@@ -15,6 +15,10 @@ use std::{
 use bytes::BytesMut;
 use serde::{Deserialize, Serialize};
 use sieve_cache::SieveCache;
+use zerocopy::{
+    little_endian::{U16, U32, U64},
+    FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned,
+};
 
 use crate::Result;
 
@@ -32,6 +36,16 @@ pub trait File {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize>;
     fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize>;
     fn sync_data(&self) -> Result<()>;
+}
+
+#[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C)]
+struct Header {
+    version: U16,
+    page_size: U32,
+    page_count: U64,
+    commited_version: U64,
+    oldest_version: U64,
 }
 
 pub struct Pager {
@@ -60,19 +74,20 @@ impl Pager {
             let mut header_buf = BytesMut::zeroed(PAGE_SIZE);
             // TODO: Probably need to make this read_exact?
             file.read_at(&mut header_buf[..], 0)?;
-            bincode::deserialize::<Header>(&header_buf[..])?
+            let header_size = std::mem::size_of::<Header>();
+            Header::read_from_bytes(&header_buf[..header_size]).unwrap()
         } else {
             Header {
-                version: VERSION,
-                page_size: PAGE_SIZE as u32,
+                version: VERSION.into(),
+                page_size: (PAGE_SIZE as u32).into(),
                 // Start with 1, we could add a backup here.
-                page_count: 1,
-                commited_version: 1,
-                oldest_version: 1,
+                page_count: 1.into(),
+                commited_version: 1.into(),
+                oldest_version: 1.into(),
             }
         };
 
-        let mut pager = Self {
+        let pager = Self {
             file,
             header,
             cache,
@@ -87,12 +102,12 @@ impl Pager {
         Ok(pager)
     }
 
-    fn write_header(&mut self) -> Result<()> {
-        let header = bincode::serialize(&self.header)?;
+    fn write_header(&self) -> Result<()> {
+        let header = self.header.as_bytes();
 
-        assert!(header.len() < PAGE_SIZE, "header must be below PAGE_SIZE");
+        debug_assert!(header.len() < PAGE_SIZE, "header must be below PAGE_SIZE");
 
-        self.file.write_at(&header[..], 0)?;
+        self.file.write_at(header, 0)?;
 
         Ok(())
     }
@@ -135,7 +150,7 @@ impl Pager {
     }
 
     fn write_page(&mut self, page_id: PhysicalPageId, page: Arc<Page>) -> Result<()> {
-        let offset = page_id.0 * self.header.page_size as usize;
+        let offset = page_id.0 * self.header.page_size.get() as usize;
         self.file.write_at(page.buf(), offset as u64)?;
 
         Ok(())
@@ -165,7 +180,7 @@ impl Pager {
         PhysicalPageId(id.0)
     }
 
-    fn update_page(&mut self, page_id: LogicalPageId, page: Arc<Page>) -> Result<()> {
+    pub fn update_page(&mut self, page_id: LogicalPageId, page: Arc<Page>) -> Result<()> {
         if !self.cache.contains_key(&page_id) {
             self.cache
                 .insert(page_id, PageCacheEntry { page: page.clone() });
@@ -185,8 +200,6 @@ impl Pager {
 
     /// Atomically update the page by creating a new page for the specified
     /// version.
-    // TODO: add `update` which adds the page to the cache and writes it to the
-    // block device.
     pub fn atomic_update(
         &mut self,
         page_id: LogicalPageId,
@@ -232,7 +245,7 @@ impl Pager {
     }
 
     fn current_version(&self) -> Version {
-        Version(self.header.commited_version + 1)
+        Version(self.header.commited_version.get() + 1)
     }
 }
 
@@ -284,15 +297,6 @@ impl From<&LogicalPageId> for LogicalPageId {
     fn from(t: &LogicalPageId) -> Self {
         *t
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Header {
-    version: u16,
-    page_size: u32,
-    page_count: u64,
-    commited_version: u64,
-    oldest_version: u64,
 }
 
 #[cfg(test)]
