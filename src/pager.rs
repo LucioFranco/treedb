@@ -204,8 +204,9 @@ impl Pager {
         let page = page.freeze();
 
         if !self.cache.contains_key(&page_id) {
-            self.cache
-                .insert(page_id, PageCacheEntry { page: page.clone() });
+            let entry = PageCacheEntry { page: page.clone() };
+
+            self.cache.insert(page_id, entry);
         } else {
             let entry = self
                 .cache

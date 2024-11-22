@@ -32,7 +32,7 @@ impl PageBufMut {
         unsafe { self.ptr.as_mut() }
     }
 
-    pub fn freeze(self) -> PageBuf {
+    pub(super) fn freeze(self) -> PageBuf {
         PageBuf {
             ptr: Rc::new(self.ptr),
         }

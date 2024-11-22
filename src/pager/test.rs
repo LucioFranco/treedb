@@ -17,17 +17,13 @@ fn update() {
     let page1_buf = page1.buf_mut();
     page1_buf.fill(42);
 
-    let page1 = page1.freeze();
-
-    pager
-        .write_page(PhysicalPageId(page1_id.0), &page1)
-        .unwrap();
+    pager.update_page(page1_id, page1).unwrap();
 
     let version = pager.current_version();
 
     let page1_read = pager.read_at(page1_id, version).unwrap();
 
-    assert_eq!(page1.buf(), page1_read.buf());
+    assert!(page1_read.buf().iter().all(|x| *x == 42));
 
     pager.commit().unwrap();
 
@@ -37,7 +33,7 @@ fn update() {
 
     let page1_read2 = pager.read_at(page1_id, version).unwrap();
 
-    assert_eq!(page1.buf(), page1_read2.buf());
+    assert!(page1_read2.buf().iter().all(|x| *x == 42));
 }
 
 #[test]
@@ -76,8 +72,7 @@ fn page_updates() {
     let mut page = pager.new_page_buffer();
     page.buf_mut().fill(1);
     let version1 = pager.current_version();
-    let page = page.freeze();
-    pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
+    pager.update_page(page_id, page).unwrap();
 
     pager.commit().unwrap();
 
