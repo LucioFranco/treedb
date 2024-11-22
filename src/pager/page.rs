@@ -1,6 +1,6 @@
-use std::{alloc::Layout, ptr::NonNull};
+use std::{alloc::Layout, ptr::NonNull, rc::Rc};
 
-use allocator_api2::{alloc::Allocator, boxed::Box};
+use allocator_api2::alloc::Allocator;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use super::PAGE_SIZE;
@@ -8,6 +8,48 @@ use super::PAGE_SIZE;
 #[derive(Clone)]
 pub struct Page {
     buf: NonNull<[u8]>,
+}
+
+pub struct PageBufMut {
+    ptr: NonNull<[u8]>,
+}
+
+#[derive(Clone)]
+pub struct PageBuf {
+    ptr: Rc<NonNull<[u8]>>,
+}
+
+impl PageBufMut {
+    pub(super) fn new(ptr: NonNull<[u8]>) -> Self {
+        PageBufMut { ptr }
+    }
+
+    pub fn buf(&self) -> &[u8] {
+        unsafe { self.ptr.as_ref() }
+    }
+
+    pub fn buf_mut(&mut self) -> &mut [u8] {
+        unsafe { self.ptr.as_mut() }
+    }
+
+    pub fn freeze(self) -> PageBuf {
+        PageBuf {
+            ptr: Rc::new(self.ptr),
+        }
+    }
+}
+
+impl PageBuf {
+    pub fn buf(&self) -> &[u8] {
+        unsafe { self.ptr.as_ref().as_ref() }
+    }
+
+    pub fn try_take(self) -> Result<PageBufMut, PageBuf> {
+        match Rc::try_unwrap(self.ptr) {
+            Ok(ptr) => Ok(PageBufMut { ptr }),
+            Err(ptr) => Err(PageBuf { ptr }),
+        }
+    }
 }
 
 #[derive(FromBytes, Immutable, Debug)]

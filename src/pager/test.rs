@@ -17,6 +17,8 @@ fn update() {
     let page1_buf = page1.buf_mut();
     page1_buf.fill(42);
 
+    let page1 = page1.freeze();
+
     pager
         .write_page(PhysicalPageId(page1_id.0), &page1)
         .unwrap();
@@ -49,6 +51,7 @@ fn multiple_pages() {
             let page_id = pager.new_page_id();
             let mut page = pager.new_page_buffer();
             page.buf_mut().fill(i as u8);
+            let page = page.freeze();
             pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
             page_id
         })
@@ -73,6 +76,7 @@ fn page_updates() {
     let mut page = pager.new_page_buffer();
     page.buf_mut().fill(1);
     let version1 = pager.current_version();
+    let page = page.freeze();
     pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
 
     pager.commit().unwrap();
@@ -103,6 +107,7 @@ fn recovery_after_crash() {
             let page_id = pager.new_page_id();
             let mut page = pager.new_page_buffer();
             page.buf_mut().fill(i as u8);
+            let page = page.freeze();
             pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
             page_id
         })
@@ -135,6 +140,7 @@ fn read_nonexistent_page() {
     // Create a page, then try reading a different one
     let page_id = pager.new_page_id();
     let page = pager.new_page_buffer();
+    let page = page.freeze();
     pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
 
     let another_nonexistent_id = LogicalPageId(page_id.0 + 1);
@@ -152,6 +158,7 @@ fn read_invalid_version() {
     // Create a page
     let page_id = pager.new_page_id();
     let page = pager.new_page_buffer();
+    let page = page.freeze();
     pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
     let current_version = pager.current_version();
 
