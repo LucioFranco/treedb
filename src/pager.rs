@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod test;
 
+mod cache;
 mod page;
 mod queue;
 
@@ -13,8 +14,9 @@ use std::{
 };
 
 use bytes::BytesMut;
+use cache::SieveCache;
 use serde::{Deserialize, Serialize};
-use sieve_cache::SieveCache;
+use typed_arena::Arena;
 use zerocopy::{
     little_endian::{U16, U32, U64},
     FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned,
@@ -52,6 +54,7 @@ pub struct Pager {
     file: Box<dyn File>,
     header: Header,
     cache: PageCache,
+    page_arena: Arena<Page>,
     page_table: HashMap<LogicalPageId, BTreeMap<Version, PhysicalPageId>>,
     next_page_id: usize,
 
@@ -90,6 +93,7 @@ impl Pager {
         let pager = Self {
             file,
             header,
+            page_arena: Arena::new(),
             cache,
             page_table,
             remap_queue,
@@ -120,19 +124,23 @@ impl Pager {
         LogicalPageId(page_id)
     }
 
-    fn new_page_buffer(&mut self) -> Arc<Page> {
-        Arc::new(Page::new())
+    fn new_page_buffer(&mut self) -> Page {
+        Page::init(&std::alloc::System, VERSION as u32, 0u64)
     }
 
-    fn read_page(&mut self, page_id: PhysicalPageId) -> Result<Arc<Page>> {
+    fn read_page(&mut self, page_id: PhysicalPageId) -> Result<Page> {
+        // TODO: figure out how to hand out pages
         let logical_page_id = LogicalPageId(page_id.0);
 
         if let Some(entry) = self.cache.get(&logical_page_id) {
             Ok(entry.page.clone())
         } else {
-            let mut page = Arc::new(Page::new());
+            let mut page = match self.cache.evict() {
+                Some((_, entry)) => entry.page,
+                None => self.new_page_buffer(),
+            };
 
-            self.read_physical_page(page_id, Arc::get_mut(&mut page).unwrap())?;
+            self.read_physical_page(page_id, &mut page)?;
 
             let entry = PageCacheEntry { page: page.clone() };
 
@@ -149,7 +157,7 @@ impl Pager {
         Ok(())
     }
 
-    fn write_page(&mut self, page_id: PhysicalPageId, page: Arc<Page>) -> Result<()> {
+    fn write_page(&mut self, page_id: PhysicalPageId, page: &Page) -> Result<()> {
         let offset = page_id.0 * self.header.page_size.get() as usize;
         self.file.write_at(page.buf(), offset as u64)?;
 
@@ -158,7 +166,7 @@ impl Pager {
 
     /// Read a page at a specific version.
     // TODO: add `read` that can support optionally bypassing the cache.
-    pub fn read_at(&mut self, id: LogicalPageId, version: Version) -> Result<Arc<Page>> {
+    pub fn read_at(&mut self, id: LogicalPageId, version: Version) -> Result<Page> {
         let page_id = self.get_physical_page_id(id, version);
 
         let page = self.read_page(page_id)?;
@@ -180,7 +188,7 @@ impl Pager {
         PhysicalPageId(id.0)
     }
 
-    pub fn update_page(&mut self, page_id: LogicalPageId, page: Arc<Page>) -> Result<()> {
+    pub fn update_page(&mut self, page_id: LogicalPageId, page: Page) -> Result<()> {
         if !self.cache.contains_key(&page_id) {
             self.cache
                 .insert(page_id, PageCacheEntry { page: page.clone() });
@@ -193,7 +201,7 @@ impl Pager {
             entry.page = page.clone();
         }
 
-        self.write_page(PhysicalPageId(page_id.0), page)?;
+        self.write_page(PhysicalPageId(page_id.0), &page)?;
 
         Ok(())
     }
@@ -204,7 +212,7 @@ impl Pager {
         &mut self,
         page_id: LogicalPageId,
         version: Version,
-        page: Arc<Page>,
+        page: Page,
     ) -> Result<LogicalPageId> {
         // Copy page
         let new_page_id = self.new_page_id();
@@ -250,7 +258,7 @@ impl Pager {
 }
 
 struct PageCacheEntry {
-    page: Arc<Page>,
+    page: Page,
 }
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]

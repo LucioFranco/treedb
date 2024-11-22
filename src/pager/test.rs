@@ -1,5 +1,3 @@
-use page::QueuePageHeader;
-
 use mock::MemoryFile;
 
 use super::*;
@@ -16,11 +14,11 @@ fn update() {
 
     assert_eq!(page1_id, LogicalPageId(1));
 
-    let page1_buf = &mut Arc::get_mut(&mut page1).unwrap().buf_mut();
+    let page1_buf = page1.buf_mut();
     page1_buf.fill(42);
 
     pager
-        .write_page(PhysicalPageId(page1_id.0), page1.clone())
+        .write_page(PhysicalPageId(page1_id.0), &page1)
         .unwrap();
 
     let version = pager.current_version();
@@ -50,8 +48,8 @@ fn multiple_pages() {
         .map(|i| {
             let page_id = pager.new_page_id();
             let mut page = pager.new_page_buffer();
-            Arc::get_mut(&mut page).unwrap().buf_mut().fill(i as u8);
-            pager.write_page(PhysicalPageId(page_id.0), page).unwrap();
+            page.buf_mut().fill(i as u8);
+            pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
             page_id
         })
         .collect();
@@ -72,22 +70,18 @@ fn page_updates() {
 
     // Create initial page
     let page_id = pager.new_page_id();
-    let mut page = Page::init(1, QueuePageHeader::default());
+    let mut page = pager.new_page_buffer();
     page.buf_mut().fill(1);
     let version1 = pager.current_version();
-    pager
-        .write_page(PhysicalPageId(page_id.0), Arc::new(page))
-        .unwrap();
+    pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
 
     pager.commit().unwrap();
 
     // Update the same page
-    let mut page = Page::init(1, QueuePageHeader::default());
+    let mut page = pager.new_page_buffer();
     page.buf_mut().fill(2);
     let version2 = pager.current_version();
-    pager
-        .atomic_update(page_id, version2, Arc::new(page))
-        .unwrap();
+    pager.atomic_update(page_id, version2, page).unwrap();
 
     // Verify we can read both versions
     let page_v1 = pager.read_at(page_id, version1).unwrap();
@@ -108,8 +102,8 @@ fn recovery_after_crash() {
         .map(|i| {
             let page_id = pager.new_page_id();
             let mut page = pager.new_page_buffer();
-            Arc::get_mut(&mut page).unwrap().buf_mut().fill(i as u8);
-            pager.write_page(PhysicalPageId(page_id.0), page).unwrap();
+            page.buf_mut().fill(i as u8);
+            pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
             page_id
         })
         .collect();
@@ -141,7 +135,7 @@ fn read_nonexistent_page() {
     // Create a page, then try reading a different one
     let page_id = pager.new_page_id();
     let page = pager.new_page_buffer();
-    pager.write_page(PhysicalPageId(page_id.0), page).unwrap();
+    pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
 
     let another_nonexistent_id = LogicalPageId(page_id.0 + 1);
     let result = pager.read_at(another_nonexistent_id, version);
@@ -158,7 +152,7 @@ fn read_invalid_version() {
     // Create a page
     let page_id = pager.new_page_id();
     let page = pager.new_page_buffer();
-    pager.write_page(PhysicalPageId(page_id.0), page).unwrap();
+    pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
     let current_version = pager.current_version();
 
     // Try reading with a future version
