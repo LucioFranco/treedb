@@ -37,6 +37,35 @@ fn update() {
 }
 
 #[test]
+fn read_dropped_page() {
+    let file = MemoryFile::default();
+
+    let mut pager = Pager::recover(file).unwrap();
+
+    let page1_id = pager.new_page_id();
+    let mut page1 = pager.new_page_buffer();
+
+    assert_eq!(page1_id, LogicalPageId(1));
+
+    let page1_buf = page1.buf_mut();
+    page1_buf.fill(42);
+
+    pager.update_page(page1_id, page1).unwrap();
+
+    let version = pager.current_version();
+
+    let page1_read = pager.read_at(page1_id, version).unwrap();
+
+    assert!(page1_read.buf().iter().all(|x| *x == 42));
+
+    pager.commit().unwrap();
+
+    drop(pager);
+
+    assert!(page1_read.buf().iter().all(|x| *x == 42));
+}
+
+#[test]
 fn multiple_pages() {
     let file = MemoryFile::default();
     let mut pager = Pager::recover(file).unwrap();

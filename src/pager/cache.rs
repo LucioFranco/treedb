@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::cell::UnsafeCell;
 use std::hash::Hash;
 use std::{collections::HashMap, ptr::NonNull};
 
@@ -24,7 +25,7 @@ impl<K: Eq + Hash + Clone, V> Node<K, V> {
 
 /// A cache based on the SIEVE eviction algorithm.
 pub struct SieveCache<K: Eq + Hash + Clone, V> {
-    map: HashMap<K, Box<Node<K, V>>>,
+    map: HashMap<K, UnsafeCell<Node<K, V>>>,
     head: Option<NonNull<Node<K, V>>>,
     tail: Option<NonNull<Node<K, V>>>,
     hand: Option<NonNull<Node<K, V>>>,
@@ -87,8 +88,11 @@ impl<K: Eq + Hash + Clone, V> SieveCache<K, V> {
         K: Borrow<Q>,
     {
         let node_ = self.map.get_mut(key)?;
-        node_.visited = true;
-        Some(&node_.value)
+
+        let node = node_.get_mut();
+
+        node.visited = true;
+        Some(&node.value)
     }
 
     /// Get a mutable reference to the value in the cache mapped to by `key`.
@@ -99,9 +103,9 @@ impl<K: Eq + Hash + Clone, V> SieveCache<K, V> {
         Q: Hash + Eq + ?Sized,
         K: Borrow<Q>,
     {
-        let node_ = self.map.get_mut(key)?;
-        node_.visited = true;
-        Some(&mut node_.value)
+        let node = self.map.get_mut(key)?.get_mut();
+        node.visited = true;
+        Some(&mut node.value)
     }
 
     /// Map `key` to `value` in the cache, possibly evicting old entries.
@@ -110,7 +114,9 @@ impl<K: Eq + Hash + Clone, V> SieveCache<K, V> {
     /// updated.
     pub fn insert(&mut self, key: K, value: V) -> bool {
         let node = self.map.get_mut(&key);
+
         if let Some(node_) = node {
+            let node_ = node_.get_mut();
             node_.visited = true;
             node_.value = value;
             return false;
@@ -118,9 +124,12 @@ impl<K: Eq + Hash + Clone, V> SieveCache<K, V> {
         if self.len >= self.capacity {
             self.evict();
         }
-        let node = Box::new(Node::new(key.clone(), value));
-        self.add_node(NonNull::from(node.as_ref()));
-        debug_assert!(!node.visited);
+        let node = Node::new(key.clone(), value);
+
+        let node = UnsafeCell::new(node);
+
+        self.add_node(NonNull::from(unsafe { &mut *node.get() }));
+        debug_assert!(!node.get_mut().visited);
         self.map.insert(key, node);
         debug_assert!(self.len < self.capacity);
         self.len += 1;
@@ -137,11 +146,15 @@ impl<K: Eq + Hash + Clone, V> SieveCache<K, V> {
         Q: Eq + Hash + ?Sized,
     {
         let node_ = self.map.get_mut(key)?;
-        let node__ = NonNull::from(node_.as_ref());
+        let node__ = NonNull::from(unsafe { &mut *node_.get() });
         if self.hand == Some(node__) {
-            self.hand = node_.as_ref().prev;
+            self.hand = node_.get().prev;
         }
-        let value = self.map.remove(key).map(|node| node.value);
+        let value = self
+            .map
+            .remove(key)
+            .map(UnsafeCell::into_inner)
+            .map(|node| node.value);
         self.remove_node(node__);
         debug_assert!(self.len > 0);
         self.len -= 1;
@@ -201,7 +214,9 @@ impl<K: Eq + Hash + Clone, V> SieveCache<K, V> {
             self.remove_node(node_);
             debug_assert!(self.len > 0);
             self.len -= 1;
-            return removed.map(|n| (n.key, n.value));
+            return removed
+                .map(UnsafeCell::into_inner)
+                .map(|n| (n.key, n.value));
         }
 
         None
