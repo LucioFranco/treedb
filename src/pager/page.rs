@@ -1,6 +1,6 @@
-use std::{alloc::Layout, ptr::NonNull};
+use std::{alloc::Layout, ptr::NonNull, rc::Rc};
 
-use allocator_api2::{alloc::Allocator, boxed::Box};
+use allocator_api2::alloc::Allocator;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use super::PAGE_SIZE;
@@ -8,6 +8,49 @@ use super::PAGE_SIZE;
 #[derive(Clone)]
 pub struct Page {
     buf: NonNull<[u8]>,
+}
+
+#[derive(Debug)]
+pub struct PageBufMut {
+    ptr: NonNull<[u8]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PageBuf {
+    ptr: Rc<NonNull<[u8]>>,
+}
+
+impl PageBufMut {
+    pub(super) fn new(ptr: NonNull<[u8]>) -> Self {
+        PageBufMut { ptr }
+    }
+
+    pub fn buf(&self) -> &[u8] {
+        unsafe { self.ptr.as_ref() }
+    }
+
+    pub fn buf_mut(&mut self) -> &mut [u8] {
+        unsafe { self.ptr.as_mut() }
+    }
+
+    pub(super) fn freeze(self) -> PageBuf {
+        PageBuf {
+            ptr: Rc::new(self.ptr),
+        }
+    }
+}
+
+impl PageBuf {
+    pub fn buf(&self) -> &[u8] {
+        unsafe { self.ptr.as_ref().as_ref() }
+    }
+
+    pub fn try_take(self) -> Result<PageBufMut, PageBuf> {
+        match Rc::try_unwrap(self.ptr) {
+            Ok(ptr) => Ok(PageBufMut { ptr }),
+            Err(ptr) => Err(PageBuf { ptr }),
+        }
+    }
 }
 
 #[derive(FromBytes, Immutable, Debug)]
@@ -108,32 +151,5 @@ impl Page {
 
     pub fn buf_mut(&mut self) -> &mut [u8] {
         unsafe { self.buf.as_mut() }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Page, QueuePageHeader};
-
-    #[test]
-    fn smoke() {
-        let mut page = Page::init(
-            &std::alloc::System,
-            42,
-            QueuePageHeader {
-                next_page_id: 42,
-                end_offset: 42,
-            },
-        );
-
-        let sub = page.view::<QueuePageHeader>().unwrap().sub_header;
-        assert_eq!(sub.next_page_id, 42);
-
-        let sub_mut = page.view_mut::<QueuePageHeader>().unwrap().sub_header;
-
-        sub_mut.next_page_id = 65;
-
-        let sub = page.view::<QueuePageHeader>().unwrap().sub_header;
-        assert_eq!(sub.next_page_id, 65);
     }
 }

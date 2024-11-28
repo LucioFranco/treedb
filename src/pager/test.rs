@@ -17,15 +17,13 @@ fn update() {
     let page1_buf = page1.buf_mut();
     page1_buf.fill(42);
 
-    pager
-        .write_page(PhysicalPageId(page1_id.0), &page1)
-        .unwrap();
+    pager.update_page(page1_id, page1).unwrap();
 
     let version = pager.current_version();
 
     let page1_read = pager.read_at(page1_id, version).unwrap();
 
-    assert_eq!(page1.buf(), page1_read.buf());
+    assert!(page1_read.buf().iter().all(|x| *x == 42));
 
     pager.commit().unwrap();
 
@@ -35,7 +33,39 @@ fn update() {
 
     let page1_read2 = pager.read_at(page1_id, version).unwrap();
 
-    assert_eq!(page1.buf(), page1_read2.buf());
+    assert!(page1_read2.buf().iter().all(|x| *x == 42));
+}
+
+#[test]
+// TODO: re-enable this page once we have the API figured out. This currently fails under miri as
+// expected.
+#[ignore]
+fn read_dropped_page() {
+    let file = MemoryFile::default();
+
+    let mut pager = Pager::recover(file).unwrap();
+
+    let page1_id = pager.new_page_id();
+    let mut page1 = pager.new_page_buffer();
+
+    assert_eq!(page1_id, LogicalPageId(1));
+
+    let page1_buf = page1.buf_mut();
+    page1_buf.fill(42);
+
+    pager.update_page(page1_id, page1).unwrap();
+
+    let version = pager.current_version();
+
+    let page1_read = pager.read_at(page1_id, version).unwrap();
+
+    assert!(page1_read.buf().iter().all(|x| *x == 42));
+
+    pager.commit().unwrap();
+
+    drop(pager);
+
+    assert!(page1_read.buf().iter().all(|x| *x == 42));
 }
 
 #[test]
@@ -49,6 +79,7 @@ fn multiple_pages() {
             let page_id = pager.new_page_id();
             let mut page = pager.new_page_buffer();
             page.buf_mut().fill(i as u8);
+            let page = page.freeze();
             pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
             page_id
         })
@@ -73,7 +104,7 @@ fn page_updates() {
     let mut page = pager.new_page_buffer();
     page.buf_mut().fill(1);
     let version1 = pager.current_version();
-    pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
+    pager.update_page(page_id, page).unwrap();
 
     pager.commit().unwrap();
 
@@ -103,6 +134,7 @@ fn recovery_after_crash() {
             let page_id = pager.new_page_id();
             let mut page = pager.new_page_buffer();
             page.buf_mut().fill(i as u8);
+            let page = page.freeze();
             pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
             page_id
         })
@@ -135,6 +167,7 @@ fn read_nonexistent_page() {
     // Create a page, then try reading a different one
     let page_id = pager.new_page_id();
     let page = pager.new_page_buffer();
+    let page = page.freeze();
     pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
 
     let another_nonexistent_id = LogicalPageId(page_id.0 + 1);
@@ -152,6 +185,7 @@ fn read_invalid_version() {
     // Create a page
     let page_id = pager.new_page_id();
     let page = pager.new_page_buffer();
+    let page = page.freeze();
     pager.write_page(PhysicalPageId(page_id.0), &page).unwrap();
     let current_version = pager.current_version();
 
