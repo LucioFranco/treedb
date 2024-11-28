@@ -1,7 +1,7 @@
 //! `treedb` is an on disk b-tree
 
 mod pager;
-pub mod tree;
+// pub mod tree;
 
 use pager::LogicalPageId;
 
@@ -13,6 +13,4 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("index `{0}` out of bounds")]
     IndexOutofBounds(LogicalPageId),
-    #[error("Unable to serialize page")]
-    Bincode(#[from] bincode::Error),
 }

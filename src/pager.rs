@@ -18,7 +18,6 @@ use std::{
 use arena::Arena;
 use bytes::BytesMut;
 use page::{PageBuf, PageBufMut};
-use serde::{Deserialize, Serialize};
 use zerocopy::{
     little_endian::{U16, U32, U64},
     FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned,
@@ -278,10 +277,10 @@ struct PageCacheEntry {
     page: PageBuf,
 }
 
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct PhysicalPageId(usize);
 
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct LogicalPageId(usize);
 
 #[derive(Debug)]
@@ -290,14 +289,14 @@ struct DelayedFreePage {
     page_id: LogicalPageId,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 struct RemappedPage {
     version: Version,
     original_page_id: LogicalPageId,
     new_page_id: LogicalPageId,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Version(u64);
 
 impl fmt::Display for LogicalPageId {

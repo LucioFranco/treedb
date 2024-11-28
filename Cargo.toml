@@ -8,8 +8,6 @@ edition = "2018"
 
 [dependencies]
 thiserror = "2"
-serde = { version = "1.0.215", features = ["derive"] }
-bincode = "1"
 zerocopy = { version = "0.8", features = ["derive"] }
 bytes = { version = "1.8", features = ["serde"] }
 allocator-api2 = "0.2.20"
