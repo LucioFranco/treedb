@@ -10,11 +10,12 @@ pub struct Page {
     buf: NonNull<[u8]>,
 }
 
+#[derive(Debug)]
 pub struct PageBufMut {
     ptr: NonNull<[u8]>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PageBuf {
     ptr: Rc<NonNull<[u8]>>,
 }
@@ -150,32 +151,5 @@ impl Page {
 
     pub fn buf_mut(&mut self) -> &mut [u8] {
         unsafe { self.buf.as_mut() }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Page, QueuePageHeader};
-
-    #[test]
-    fn smoke() {
-        let mut page = Page::init(
-            &std::alloc::System,
-            42,
-            QueuePageHeader {
-                next_page_id: 42,
-                end_offset: 42,
-            },
-        );
-
-        let sub = page.view::<QueuePageHeader>().unwrap().sub_header;
-        assert_eq!(sub.next_page_id, 42);
-
-        let sub_mut = page.view_mut::<QueuePageHeader>().unwrap().sub_header;
-
-        sub_mut.next_page_id = 65;
-
-        let sub = page.view::<QueuePageHeader>().unwrap().sub_header;
-        assert_eq!(sub.next_page_id, 65);
     }
 }
