@@ -10,9 +10,7 @@ mod queue;
 
 use std::{
     collections::{BTreeMap, HashMap},
-    convert::TryInto,
     fmt,
-    ptr::NonNull,
 };
 
 use arena::Arena;
@@ -25,7 +23,7 @@ use zerocopy::{
 
 use crate::Result;
 
-use self::{cache::Cache, page::Page, queue::Queue};
+use self::{cache::Cache, queue::Queue};
 
 /// First version of this!
 const VERSION: u16 = 1;
@@ -56,8 +54,7 @@ pub struct Pager {
     page_arena: Arena<std::alloc::System>,
     page_table: HashMap<LogicalPageId, BTreeMap<Version, PhysicalPageId>>,
     next_page_id: usize,
-
-    remap_queue: Queue<RemappedPage>,
+    // remap_queue: Queue<RemappedPage>,
 }
 
 impl Pager {
@@ -68,7 +65,7 @@ impl Pager {
 
         let cache = Cache::new(1024);
         let page_table = HashMap::new();
-        let remap_queue = Queue::create(PhysicalPageId(0), 0)?;
+        // let remap_queue = Queue::create(PhysicalPageId(0), 0)?;
 
         let file = Box::new(file) as Box<dyn File>;
 
@@ -97,7 +94,7 @@ impl Pager {
             page_arena,
             cache,
             page_table,
-            remap_queue,
+            // remap_queue,
             // One because header page
             next_page_id: 1,
         };
@@ -142,7 +139,7 @@ impl Pager {
 
     fn alloc_page_buffer(&mut self) -> Option<PageBufMut> {
         let ptr = self.page_arena.alloc().ok()?;
-        let ptr = NonNull::slice_from_raw_parts(ptr, PAGE_SIZE);
+        // let ptr = NonNull::slice_from_raw_parts(ptr, PAGE_SIZE);
 
         Some(PageBufMut::new(ptr))
     }
@@ -277,7 +274,8 @@ struct PageCacheEntry {
     page: PageBuf,
 }
 
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, FromBytes, IntoBytes, Immutable)]
+#[repr(C)]
 pub struct PhysicalPageId(usize);
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]

@@ -1,3 +1,5 @@
+use zerocopy::{FromBytes, Immutable, IntoBytes};
+
 use super::page::PageBufMut;
 use super::{LogicalPageId, Pager, PhysicalPageId};
 use crate::Result;
@@ -5,23 +7,34 @@ use std::marker::PhantomData;
 
 pub struct Queue<T> {
     head_reader: HeadReader<T>,
-    // head_writer: Cursor,
-    // tail_writer: Cursor,
+    head_writer: Cursor<T>,
+    tail_writer: Cursor<T>,
 }
 
 impl<T> Queue<T> {
-    pub fn create(initial_page: PhysicalPageId, queue_id: u8) -> Result<Self> {
-        Ok(Self {
-            head_reader: HeadReader::init(initial_page),
-        })
+    pub fn create(pager: &mut Pager, initial_page: PhysicalPageId, queue_id: u8) -> Result<Self> {
+        // let head_writer = Cursor::init(pager, pager.new_page_id())?;
+        // let tail_writer = Cursor::init(pager, pager.new_page_id())?;
+
+        // Ok(Self { head_writer, tail_writer })
+        // Ok(Self {
+        //     head_reader: HeadReader::init(initial_page),
+        // })
+        todo!()
     }
 
     pub fn recover(_page_id: LogicalPageId) -> Result<Self> {
         todo!()
     }
 
-    pub fn push_back(&mut self, value: T) {
-        todo!()
+    pub fn push_front(&mut self, pager: &mut Pager, value: T) -> Result<()> {
+        self.head_writer.write(pager, value)?;
+        Ok(())
+    }
+
+    pub fn push_back(&mut self, pager: &mut Pager, value: T) -> Result<()> {
+        self.tail_writer.write(pager, value)?;
+        Ok(())
     }
 
     /// Only return the records that have been flushed, and pops from the front of the queue.
@@ -31,6 +44,24 @@ impl<T> Queue<T> {
 
     pub fn state(&self) -> &QueueState {
         // &self.state
+        todo!()
+    }
+}
+
+struct Cursor<T> {
+    page_id: PhysicalPageId,
+    page: PageBufMut,
+    _pd: PhantomData<fn(T)>,
+}
+
+impl<T> Cursor<T> {
+    pub(crate) fn init(pager: &mut Pager, init_page_id: PhysicalPageId) -> Result<Self> {
+        let page = pager.new_page_buffer();
+
+        todo!()
+    }
+
+    pub(crate) fn write(&mut self, pager: &mut Pager, item: T) -> Result<()> {
         todo!()
     }
 }
@@ -129,9 +160,10 @@ impl<T> HeadReader<T> {
 //     }
 // }
 
-#[derive(Debug)]
+#[derive(Debug, FromBytes, IntoBytes, Immutable)]
 pub struct QueueState {
-    queue_id: u8,
+    // Only really need u8 but saving space for other things
+    queue_id: u64,
     head_page: PhysicalPageId,
     tail_page: PhysicalPageId,
 }
