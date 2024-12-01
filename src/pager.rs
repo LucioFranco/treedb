@@ -47,25 +47,27 @@ struct Header {
     oldest_version: U64,
 }
 
-pub struct Pager {
-    file: Box<dyn File>,
+pub struct DWALPager {
     header: Header,
-    cache: Cache<LogicalPageId, PageCacheEntry>,
-    page_arena: Arena<std::alloc::System>,
     page_table: HashMap<LogicalPageId, BTreeMap<Version, PhysicalPageId>>,
-    next_page_id: usize,
-    // remap_queue: Queue<RemappedPage>,
+    page_cache: PageCache,
+    remap_queue: Queue<RemappedPage>,
 }
 
-impl Pager {
+struct PageCache {
+    file: Box<dyn File>,
+    next_page_id: usize,
+    cache: Cache<LogicalPageId, PageCacheEntry>,
+    page_arena: Arena<std::alloc::System>,
+}
+
+impl DWALPager {
     /// Recover a `VersionedPager`, if the file is empty it will create a new
     /// pager.
     pub fn recover(file: impl File + 'static) -> Result<Self> {
         let file_size = file.len()?;
 
-        let cache = Cache::new(1024);
         let page_table = HashMap::new();
-        // let remap_queue = Queue::create(PhysicalPageId(0), 0)?;
 
         let file = Box::new(file) as Box<dyn File>;
 
@@ -86,17 +88,15 @@ impl Pager {
             }
         };
 
-        let page_arena = Arena::new(std::alloc::System, PAGE_SIZE, 1024);
+        let mut page_cache = PageCache::new(file);
+
+        let remap_queue = Queue::create(&mut page_cache, 0)?;
 
         let pager = Self {
-            file,
             header,
-            page_arena,
-            cache,
             page_table,
-            // remap_queue,
-            // One because header page
-            next_page_id: 1,
+            page_cache,
+            remap_queue,
         };
 
         pager.write_header()?;
@@ -104,22 +104,124 @@ impl Pager {
         Ok(pager)
     }
 
-    fn write_header(&self) -> Result<()> {
-        let header = self.header.as_bytes();
+    pub fn new_page_id(&mut self) -> LogicalPageId {
+        // TODO: re-use freemap etc
+        let page_id = self.page_cache.new_last_page_id();
 
-        debug_assert!(header.len() < PAGE_SIZE, "header must be below PAGE_SIZE");
+        LogicalPageId(page_id.0)
+    }
 
-        self.file.write_at(header, 0)?;
+    /// Read a page at a specific version.
+    // TODO: add `read` that can support optionally bypassing the cache.
+    pub fn read_at(&mut self, id: LogicalPageId, version: Version) -> Result<PageBuf> {
+        let page_id = self.get_physical_page_id(id, version);
+
+        let page = self.page_cache.read_page(page_id)?;
+
+        Ok(page)
+    }
+
+    fn get_physical_page_id(&mut self, id: LogicalPageId, version: Version) -> PhysicalPageId {
+        if let Some(remapped_pages) = self.page_table.get(&id) {
+            if let Some((_, page)) = remapped_pages
+                .range(..)
+                .filter(|(v, _)| *v <= &version)
+                .next_back()
+            {
+                return *page;
+            }
+        }
+
+        PhysicalPageId(id.0)
+    }
+
+    /// Atomically update the page by creating a new page for the specified
+    /// version.
+    pub fn atomic_update(
+        &mut self,
+        page_id: LogicalPageId,
+        version: Version,
+        page: PageBufMut,
+    ) -> Result<LogicalPageId> {
+        // Copy page
+        let new_page_id = self.new_page_id();
+
+        self.page_cache.update_page(new_page_id, page)?;
+
+        let versions = self.page_table.entry(page_id).or_insert(BTreeMap::new());
+
+        // Pushed into the queue to be un-mapped later
+        // self.remap_queue.push_back(RemappedPage {
+        //     version,
+        //     original_page_id: page_id,
+        //     new_page_id,
+        // });
+
+        versions.insert(version, PhysicalPageId(new_page_id.0));
+
+        Ok(new_page_id)
+    }
+
+    pub fn commit(&mut self) -> Result<()> {
+        self.header.commited_version += 1;
+
+        self.write_header()?;
+        self.page_cache.flush()?;
 
         Ok(())
     }
 
-    pub fn new_page_id(&mut self) -> LogicalPageId {
+    pub fn new_page_buffer(&mut self) -> PageBufMut {
+        self.page_cache.new_page_buffer()
+    }
+
+    pub fn update_page(&mut self, page_id: LogicalPageId, page: PageBufMut) -> Result<()> {
+        self.page_cache.update_page(page_id, page)
+    }
+
+    fn write_page(&mut self, page_id: PhysicalPageId, page: &PageBuf) -> Result<()> {
+        self.page_cache.write_page(page_id, page)
+    }
+
+    /// Free a page at the specified version.
+    pub fn free(&mut self, _page_id: LogicalPageId, _version: Version) {
+        // First check if this page id matches any "originally" remapped pages
+        // from the remapped_pages map. If it is an original page then add
+        // it to the back of the `remap_queue`. If the version is older than
+        // the last effective version we can add it to the freelist page,
+        // otherwise add it to the delayed free list queue.
+        todo!()
+    }
+
+    fn current_version(&self) -> Version {
+        Version(self.header.commited_version.get() + 1)
+    }
+
+    fn write_header(&self) -> Result<()> {
+        self.page_cache.write_header(&self.header)
+    }
+}
+
+impl PageCache {
+    fn new(file: Box<dyn File>) -> Self {
+        let cache = Cache::new(1024);
+        let page_arena = Arena::new(std::alloc::System, PAGE_SIZE, 1024);
+
+        Self {
+            file,
+            cache,
+            page_arena,
+            // One because header page
+            next_page_id: 1,
+        }
+    }
+
+    pub fn new_last_page_id(&mut self) -> PhysicalPageId {
         // TODO: re-use freemap etc
         let page_id = self.next_page_id;
         self.next_page_id += 1;
 
-        LogicalPageId(page_id)
+        PhysicalPageId(page_id)
     }
 
     fn new_page_buffer(&mut self) -> PageBufMut {
@@ -165,44 +267,6 @@ impl Pager {
         }
     }
 
-    fn read_physical_page(&self, page_id: PhysicalPageId, page: &mut PageBufMut) -> Result<()> {
-        let offset = page_id.0 * PAGE_SIZE;
-        self.file.read_at(page.buf_mut(), offset as u64)?;
-
-        Ok(())
-    }
-
-    fn write_page(&mut self, page_id: PhysicalPageId, page: &PageBuf) -> Result<()> {
-        let offset = page_id.0 * self.header.page_size.get() as usize;
-        self.file.write_at(page.buf(), offset as u64)?;
-
-        Ok(())
-    }
-
-    /// Read a page at a specific version.
-    // TODO: add `read` that can support optionally bypassing the cache.
-    pub fn read_at(&mut self, id: LogicalPageId, version: Version) -> Result<PageBuf> {
-        let page_id = self.get_physical_page_id(id, version);
-
-        let page = self.read_page(page_id)?;
-
-        Ok(page)
-    }
-
-    fn get_physical_page_id(&mut self, id: LogicalPageId, version: Version) -> PhysicalPageId {
-        if let Some(remapped_pages) = self.page_table.get(&id) {
-            if let Some((_, page)) = remapped_pages
-                .range(..)
-                .filter(|(v, _)| *v <= &version)
-                .next_back()
-            {
-                return *page;
-            }
-        }
-
-        PhysicalPageId(id.0)
-    }
-
     pub fn update_page(&mut self, page_id: LogicalPageId, page: PageBufMut) -> Result<()> {
         let page = page.freeze();
 
@@ -219,54 +283,32 @@ impl Pager {
         Ok(())
     }
 
-    /// Atomically update the page by creating a new page for the specified
-    /// version.
-    pub fn atomic_update(
-        &mut self,
-        page_id: LogicalPageId,
-        version: Version,
-        page: PageBufMut,
-    ) -> Result<LogicalPageId> {
-        // Copy page
-        let new_page_id = self.new_page_id();
-
-        self.update_page(new_page_id, page)?;
-
-        let versions = self.page_table.entry(page_id).or_insert(BTreeMap::new());
-
-        // Pushed into the queue to be un-mapped later
-        // self.remap_queue.push_back(RemappedPage {
-        //     version,
-        //     original_page_id: page_id,
-        //     new_page_id,
-        // });
-
-        versions.insert(version, PhysicalPageId(new_page_id.0));
-
-        Ok(new_page_id)
-    }
-
-    pub fn commit(&mut self) -> Result<()> {
-        self.header.commited_version += 1;
-
-        self.write_header()?;
-        self.file.sync_data()?;
+    fn read_physical_page(&self, page_id: PhysicalPageId, page: &mut PageBufMut) -> Result<()> {
+        let offset = page_id.0 * PAGE_SIZE;
+        self.file.read_at(page.buf_mut(), offset as u64)?;
 
         Ok(())
     }
 
-    /// Free a page at the specified version.
-    pub fn free(&mut self, _page_id: LogicalPageId, _version: Version) {
-        // First check if this page id matches any "originally" remapped pages
-        // from the remapped_pages map. If it is an original page then add
-        // it to the back of the `remap_queue`. If the version is older than
-        // the last effective version we can add it to the freelist page,
-        // otherwise add it to the delayed free list queue.
-        todo!()
+    fn write_page(&mut self, page_id: PhysicalPageId, page: &PageBuf) -> Result<()> {
+        let offset = page_id.0 * PAGE_SIZE;
+        self.file.write_at(page.buf(), offset as u64)?;
+
+        Ok(())
     }
 
-    fn current_version(&self) -> Version {
-        Version(self.header.commited_version.get() + 1)
+    fn write_header(&self, header: &Header) -> Result<()> {
+        let header = header.as_bytes();
+
+        debug_assert!(header.len() < PAGE_SIZE, "header must be below PAGE_SIZE");
+
+        self.file.write_at(header, 0)?;
+
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.file.sync_data()
     }
 }
 

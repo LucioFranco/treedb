@@ -7,12 +7,14 @@ fn update() {
     let file = MemoryFile::default();
     let file2 = file.clone();
 
-    let mut pager = Pager::recover(file).unwrap();
+    let mut pager = DWALPager::recover(file).unwrap();
 
     let page1_id = pager.new_page_id();
     let mut page1 = pager.new_page_buffer();
 
-    assert_eq!(page1_id, LogicalPageId(1));
+    // This is higher because we use a couple pages upfront for internal
+    // tracking.
+    assert_eq!(page1_id, LogicalPageId(2));
 
     let page1_buf = page1.buf_mut();
     page1_buf.fill(42);
@@ -29,7 +31,7 @@ fn update() {
 
     drop(pager);
 
-    let mut pager = Pager::recover(file2).unwrap();
+    let mut pager = DWALPager::recover(file2).unwrap();
 
     let page1_read2 = pager.read_at(page1_id, version).unwrap();
 
@@ -43,7 +45,7 @@ fn update() {
 fn read_dropped_page() {
     let file = MemoryFile::default();
 
-    let mut pager = Pager::recover(file).unwrap();
+    let mut pager = DWALPager::recover(file).unwrap();
 
     let page1_id = pager.new_page_id();
     let mut page1 = pager.new_page_buffer();
@@ -71,7 +73,7 @@ fn read_dropped_page() {
 #[test]
 fn multiple_pages() {
     let file = MemoryFile::default();
-    let mut pager = Pager::recover(file).unwrap();
+    let mut pager = DWALPager::recover(file).unwrap();
 
     // Create and write multiple pages
     let page_ids: Vec<_> = (0..3)
@@ -97,7 +99,7 @@ fn multiple_pages() {
 #[test]
 fn page_updates() {
     let file = MemoryFile::default();
-    let mut pager = Pager::recover(file).unwrap();
+    let mut pager = DWALPager::recover(file).unwrap();
 
     // Create initial page
     let page_id = pager.new_page_id();
@@ -128,7 +130,7 @@ fn recovery_after_crash() {
     let file2 = file.clone();
 
     // Session 1: Create and commit some pages
-    let mut pager = Pager::recover(file).unwrap();
+    let mut pager = DWALPager::recover(file).unwrap();
     let page_ids: Vec<_> = (0..3)
         .map(|i| {
             let page_id = pager.new_page_id();
@@ -145,7 +147,7 @@ fn recovery_after_crash() {
     drop(pager);
 
     // Session 2: Recover and verify
-    let mut pager = Pager::recover(file2).unwrap();
+    let mut pager = DWALPager::recover(file2).unwrap();
     for (i, &page_id) in page_ids.iter().enumerate() {
         let page = pager.read_at(page_id, version).unwrap();
         assert!(page.buf().iter().all(|&b| b == i as u8));
@@ -156,7 +158,7 @@ fn recovery_after_crash() {
 #[ignore]
 fn read_nonexistent_page() {
     let file = MemoryFile::default();
-    let mut pager = Pager::recover(file).unwrap();
+    let mut pager = DWALPager::recover(file).unwrap();
     let version = pager.current_version();
 
     // Try reading a page ID that was never created
@@ -180,7 +182,7 @@ fn read_nonexistent_page() {
 #[ignore]
 fn read_invalid_version() {
     let file = MemoryFile::default();
-    let mut pager = Pager::recover(file).unwrap();
+    let mut pager = DWALPager::recover(file).unwrap();
 
     // Create a page
     let page_id = pager.new_page_id();
