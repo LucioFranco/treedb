@@ -1,3 +1,5 @@
+mod cursor;
+
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use super::page::PageBufMut;
@@ -67,6 +69,10 @@ struct Cursor<T> {
 
 impl<T> Cursor<T> {
     pub(crate) fn init(pager: &mut PageCache, init_page_id: PhysicalPageId) -> Result<Self> {
+        // Check write mode:
+        // if pop || readonly: point cursor to init_page_id, if end_page != page_id start loading
+        // the next page.
+
         let mut page = pager.new_page_buffer();
 
         let queue_header = QueuePageHeader {

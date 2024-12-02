@@ -320,6 +320,10 @@ struct PageCacheEntry {
 #[repr(C)]
 pub struct PhysicalPageId(usize);
 
+impl PhysicalPageId {
+    const INVALID_ID: Self = PhysicalPageId(usize::MAX);
+}
+
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct LogicalPageId(usize);
 
