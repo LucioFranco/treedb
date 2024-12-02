@@ -7,7 +7,7 @@ use super::{DWALPager, LogicalPageId, PageCache, PhysicalPageId};
 use crate::Result;
 use std::marker::PhantomData;
 
-pub struct Queue<T> {
+pub struct FIFOQueue<T> {
     head_reader: Cursor<T>,
     head_writer: Cursor<T>,
     tail_writer: Cursor<T>,
@@ -20,7 +20,7 @@ pub struct QueuePageHeader {
     _pad: [u16; 3],
 }
 
-impl<T> Queue<T> {
+impl<T> FIFOQueue<T> {
     pub fn create(pager: &mut PageCache, queue_id: u8) -> Result<Self> {
         let init_page_id = pager.new_last_page_id();
 

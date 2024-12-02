@@ -23,7 +23,7 @@ use zerocopy::{
 
 use crate::Result;
 
-use self::{cache::Cache, queue::Queue};
+use self::{cache::Cache, queue::FIFOQueue};
 
 /// First version of this!
 const VERSION: u16 = 1;
@@ -51,7 +51,7 @@ pub struct DWALPager {
     header: Header,
     page_table: HashMap<LogicalPageId, BTreeMap<Version, PhysicalPageId>>,
     page_cache: PageCache,
-    remap_queue: Queue<RemappedPage>,
+    remap_queue: FIFOQueue<RemappedPage>,
 }
 
 struct PageCache {
@@ -90,7 +90,7 @@ impl DWALPager {
 
         let mut page_cache = PageCache::new(file);
 
-        let remap_queue = Queue::create(&mut page_cache, 0)?;
+        let remap_queue = FIFOQueue::create(&mut page_cache, 0)?;
 
         let pager = Self {
             header,
