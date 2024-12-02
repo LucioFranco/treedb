@@ -324,7 +324,7 @@ impl PhysicalPageId {
     const INVALID_ID: Self = PhysicalPageId(usize::MAX);
 }
 
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, IntoBytes, FromBytes, Immutable)]
 pub struct LogicalPageId(usize);
 
 #[derive(Debug)]
@@ -333,14 +333,14 @@ struct DelayedFreePage {
     page_id: LogicalPageId,
 }
 
-#[derive(Debug)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Debug)]
 struct RemappedPage {
     version: Version,
     original_page_id: LogicalPageId,
     new_page_id: LogicalPageId,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, IntoBytes, FromBytes, Immutable)]
 pub struct Version(u64);
 
 impl fmt::Display for LogicalPageId {

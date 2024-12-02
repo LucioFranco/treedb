@@ -1,32 +1,29 @@
 mod cursor;
 
-use zerocopy::{FromBytes, Immutable, IntoBytes};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-use super::page::PageBufMut;
-use super::{DWALPager, LogicalPageId, PageCache, PhysicalPageId};
+use super::{PageCache, PhysicalPageId};
 use crate::Result;
-use std::marker::PhantomData;
+
+use cursor::{ReadCursor, WriteCursor};
 
 pub struct FIFOQueue<T> {
-    head_reader: Cursor<T>,
-    head_writer: Cursor<T>,
-    tail_writer: Cursor<T>,
+    head_reader: ReadCursor<T>,
+    head_writer: WriteCursor<T>,
+    tail_writer: WriteCursor<T>,
 }
 
-#[derive(IntoBytes, FromBytes, Immutable, Debug, Default)]
-pub struct QueuePageHeader {
-    next_page_id: u64,
-    end_offset: u16,
-    _pad: [u16; 3],
-}
-
-impl<T> FIFOQueue<T> {
-    pub fn create(pager: &mut PageCache, queue_id: u8) -> Result<Self> {
+impl<T: IntoBytes + FromBytes + KnownLayout + Immutable> FIFOQueue<T> {
+    pub fn create(pager: &mut PageCache, _queue_id: u8) -> Result<Self> {
         let init_page_id = pager.new_last_page_id();
 
-        let head_reader = Cursor::init(pager, init_page_id)?;
-        let tail_writer = Cursor::init(pager, init_page_id)?;
-        let head_writer = Cursor::init(pager, PhysicalPageId(0))?;
+        let head_reader = ReadCursor::init(pager, init_page_id, init_page_id)?;
+        let tail_writer = WriteCursor::init(pager, init_page_id, PhysicalPageId::INVALID_ID)?;
+        let head_writer = WriteCursor::init(
+            pager,
+            PhysicalPageId::INVALID_ID,
+            PhysicalPageId::INVALID_ID,
+        )?;
 
         Ok(Self {
             head_reader,
@@ -35,7 +32,7 @@ impl<T> FIFOQueue<T> {
         })
     }
 
-    pub fn recover(_page_id: LogicalPageId) -> Result<Self> {
+    pub fn recover(_page_id: PhysicalPageId) -> Result<Self> {
         todo!()
     }
 
@@ -50,47 +47,12 @@ impl<T> FIFOQueue<T> {
     }
 
     /// Only return the records that have been flushed, and pops from the front of the queue.
-    pub fn pop(&mut self, pager: &mut DWALPager) -> Result<Option<T>> {
-        // self.head_reader.read_next(pager)
-        todo!()
+    pub fn pop(&mut self, pager: &mut PageCache) -> Result<Option<T>> {
+        self.head_reader.pop(pager)
     }
 
     pub fn state(&self) -> &QueueState {
         // &self.state
-        todo!()
-    }
-}
-
-struct Cursor<T> {
-    page_id: PhysicalPageId,
-    page: PageBufMut,
-    _pd: PhantomData<fn(T)>,
-}
-
-impl<T> Cursor<T> {
-    pub(crate) fn init(pager: &mut PageCache, init_page_id: PhysicalPageId) -> Result<Self> {
-        // Check write mode:
-        // if pop || readonly: point cursor to init_page_id, if end_page != page_id start loading
-        // the next page.
-
-        let mut page = pager.new_page_buffer();
-
-        let queue_header = QueuePageHeader {
-            next_page_id: 0,
-            end_offset: 0,
-            ..Default::default()
-        };
-
-        queue_header.write_to_prefix(page.buf_mut()).unwrap();
-
-        Ok(Cursor {
-            page_id: init_page_id,
-            page,
-            _pd: PhantomData,
-        })
-    }
-
-    pub(crate) fn write(&mut self, pager: &mut PageCache, item: T) -> Result<()> {
         todo!()
     }
 }

@@ -1,6 +1,6 @@
 use std::{ptr::NonNull, rc::Rc};
 
-use zerocopy::{FromBytes, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, FromZeros, IntoBytes, KnownLayout};
 
 use crate::pager::VERSION;
 
@@ -42,11 +42,13 @@ impl PageBufMut {
     pub fn init(&mut self) {
         let buf = self.buf_mut();
 
-        let (header, _) = PageHeader::mut_from_prefix(&mut buf[..]).unwrap();
+        let (header, data) = PageHeader::mut_from_prefix(&mut buf[..]).unwrap();
 
         header.version = VERSION as u8;
         header.page_type = 0;
         header.checksum = 0;
+
+        data.zero();
     }
 
     pub fn header_mut(&mut self) -> &mut PageHeader {
